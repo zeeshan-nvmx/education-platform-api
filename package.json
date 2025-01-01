@@ -1,0 +1,11 @@
+{
+  "name": "education-platform-api",
+  "version": "1.0.0",
+  "description": "A edtech platform api with course, module and video lesson support with module by module and course purchasability. ",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Ashiqur Rahman Zeeshan",
+  "license": "ISC"
+}
