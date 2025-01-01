@@ -12,10 +12,11 @@ const { apiLimiter } = require('./middleware/rateLimiter')
 const errorHandler = require('./middleware/error')
 
 const app = express()
-let server
 
 // Global Middleware
-app.use(cors())
+app.use(
+  cors()
+)
 app.use(helmet())
 if (process.env.NODE_ENV === 'development') {
   app.use(morgan('dev'))
@@ -28,12 +29,6 @@ app.use(hpp())
 app.use(compression())
 app.use('/api', apiLimiter)
 
-// Request Logger for Debugging
-app.use((req, res, next) => {
-  console.log(`${req.method} ${req.originalUrl}`)
-  next()
-})
-
 // Health Check
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok' })
@@ -41,18 +36,18 @@ app.get('/health', (req, res) => {
 
 // Routes
 app.use('/api/auth', require('./routes/auth.routes'))
-// app.use('/api/users', require('./routes/users'));
-// app.use('/api/courses', require('./routes/courses'));
-// app.use('/api/modules', require('./routes/modules'));
-// app.use('/api/lessons', require('./routes/lessons'));
-// app.use('/api/quizzes', require('./routes/quizzes'));
-// app.use('/api/payments', require('./routes/payments'));
-// app.use('/api/discounts', require('./routes/discounts'));
-// app.use('/api/progress', require('./routes/progress'));
-// app.use('/api/reviews', require('./routes/reviews'));
+// app.use('/api/users', require('./routes/users'))
+// app.use('/api/courses', require('./routes/courses'))
+// app.use('/api/modules', require('./routes/modules'))
+// app.use('/api/lessons', require('./routes/lessons'))
+// app.use('/api/quizzes', require('./routes/quizzes'))
+// app.use('/api/payments', require('./routes/payments'))
+// app.use('/api/discounts', require('./routes/discounts'))
+// app.use('/api/progress', require('./routes/progress'))
+// app.use('/api/reviews', require('./routes/reviews'))
 
 // 404 Handler
-app.all('*', (req, res) => {
+app.all('*', (req, res, next) => {
   res.status(404).json({
     status: 'error',
     message: `Can't find ${req.originalUrl} on this server!`,
@@ -61,15 +56,6 @@ app.all('*', (req, res) => {
 
 // Global Error Handler
 app.use(errorHandler)
-
-// Base Error Handler
-app.use((err, req, res, next) => {
-  console.error(err.stack)
-  res.status(500).json({
-    status: 'error',
-    message: err.message || 'Internal server error',
-  })
-})
 
 // Handle Uncaught Exceptions
 process.on('uncaughtException', (err) => {
@@ -82,13 +68,9 @@ process.on('uncaughtException', (err) => {
 process.on('unhandledRejection', (err) => {
   console.error('UNHANDLED REJECTION! 💥 Shutting down...')
   console.error(err.name, err.message)
-  if (server) {
-    server.close(() => {
-      process.exit(1)
-    })
-  } else {
+  server.close(() => {
     process.exit(1)
-  }
+  })
 })
 
 const port = process.env.PORT || 3000
@@ -98,7 +80,8 @@ mongoose
   .connect(process.env.MONGODB_URI)
   .then(() => {
     console.log('MongoDB connected')
-    server = app.listen(port, () => {
+
+    app.listen(port, () => {
       console.log(`Server running on port ${port}`)
     })
   })
