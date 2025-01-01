@@ -1,5 +1,4 @@
 require('dotenv').config()
-// require('./utils/validateEnv')
 const express = require('express')
 const mongoose = require('mongoose')
 const cors = require('cors')
@@ -9,8 +8,8 @@ const compression = require('compression')
 const mongoSanitize = require('express-mongo-sanitize')
 const xss = require('xss-clean')
 const hpp = require('hpp')
-// const { apiLimiter } = require('./middleware/rateLimiter')
-// const errorHandler = require('./middleware/error')
+const { apiLimiter } = require('./middleware/rateLimiter')
+const errorHandler = require('./middleware/error')
 
 const app = express()
 
@@ -31,7 +30,7 @@ app.use(mongoSanitize())
 app.use(xss())
 app.use(hpp())
 app.use(compression())
-// app.use('/api', apiLimiter)
+app.use('/api', apiLimiter)
 
 // Health Check
 app.get('/health', (req, res) => {
@@ -59,7 +58,7 @@ app.all('*', (req, res, next) => {
 })
 
 // Global Error Handler
-// app.use(errorHandler)
+app.use(errorHandler)
 
 // Handle Uncaught Exceptions
 process.on('uncaughtException', (err) => {
