@@ -1,45 +1,64 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
-const userSchema = new mongoose.Schema({
-  email: {
-    type: String,
-    required: true,
-    unique: true,
-    trim: true,
-  },
-  password: {
-    type: String,
-    required: true,
-    minlength: 8,
-  },
-  role: {
-    type: String,
-    enum: ['user', 'admin', 'subAdmin', 'moderator'],
-    default: 'user',
-  },
-  isEmailVerified: {
-    type: Boolean,
-    default: false,
-  },
-  verificationToken: String,
-  resetPasswordToken: String,
-  resetPasswordExpires: Date,
-  enrolledCourses: [{
-    course: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Course',
+const userSchema = new mongoose.Schema(
+  {
+    firstName: {
+      type: String,
+      required: true,
+      unique: true,
+      trim: true,
     },
-    enrolledAt: {
-      type: Date,
-      default: Date.now,
+    lastName: {
+      type: String,
+      required: true,
+      unique: true,
+      trim: true,
     },
-    completedModules: [{
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Module',
-    }],
-  }],
-}, { timestamps: true });
+    email: {
+      type: String,
+      required: true,
+      unique: true,
+      trim: true,
+    },
+    password: {
+      type: String,
+      required: true,
+      minlength: 8,
+    },
+    role: {
+      type: String,
+      enum: ['user', 'admin', 'subAdmin', 'moderator'],
+      default: 'user',
+    },
+    isEmailVerified: {
+      type: Boolean,
+      default: false,
+    },
+    verificationToken: String,
+    resetPasswordToken: String,
+    resetPasswordExpires: Date,
+    enrolledCourses: [
+      {
+        course: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'Course',
+        },
+        enrolledAt: {
+          type: Date,
+          default: Date.now,
+        },
+        completedModules: [
+          {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Module',
+          },
+        ],
+      },
+    ],
+  },
+  { timestamps: true }
+)
 
 userSchema.pre('save', async function(next) {
   if (!this.isModified('password')) return next();
