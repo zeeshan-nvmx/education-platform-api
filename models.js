@@ -86,6 +86,54 @@ userSchema.pre('findOne', function () {
   this.where({ isDeleted: false })
 })
 
+const instructorSchema = new mongoose.Schema(
+  {
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    description: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    designation: {
+      type: String,
+      trim: true,
+    },
+    expertise: [
+      {
+        type: String,
+        trim: true,
+      },
+    ],
+    image: {
+      type: String,
+      trim: true,
+    },
+    imageKey: {
+      type: String,
+      trim: true,
+    },
+    socialLinks: {
+      linkedin: String,
+      twitter: String,
+      website: String,
+    },
+    bio: {
+      type: String,
+      trim: true,
+    },
+    achievements: [
+      {
+        type: String,
+      },
+    ],
+  },
+  { _id: true }
+)
+
 const courseSchema = new mongoose.Schema(
   {
     title: {
@@ -103,7 +151,14 @@ const courseSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
-    thumbnail: String,
+    thumbnail: {
+      type: String,
+      trim: true,
+    },
+    thumbnailKey: {
+      type: String,
+      trim: true,
+    },
     price: {
       type: Number,
       required: true,
@@ -114,6 +169,15 @@ const courseSchema = new mongoose.Schema(
       ref: 'User',
       required: true,
       index: true,
+    },
+    instructors: {
+      type: [instructorSchema],
+      validate: {
+        validator: function (v) {
+          return v.length > 0 // Ensures at least one instructor
+        },
+        message: 'Course must have at least one instructor',
+      },
     },
     featured: {
       type: Boolean,
