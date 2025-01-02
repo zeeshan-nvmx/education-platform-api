@@ -43,7 +43,7 @@ app.get('/health', (req, res) => {
 app.use('/api/auth', require('./routes/auth.routes'))
 app.use('/api/users', require('./routes/user.routes'));
 app.use('/api/admin', require('./routes/admin.routes'));
-// app.use('/api/courses', require('./routes/courses'));
+app.use('/api/courses', require('./routes/course.routes'));
 // app.use('/api/modules', require('./routes/modules'));
 // app.use('/api/lessons', require('./routes/lessons'));
 // app.use('/api/quizzes', require('./routes/quizzes'));
