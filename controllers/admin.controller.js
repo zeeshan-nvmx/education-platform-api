@@ -98,7 +98,6 @@ exports.createUser = async (req, res, next) => {
 
     // Return success response without sensitive data
     res.status(201).json({
-      status: 'success',
       message: `${role} account created successfully. Verification otp to their email has been sent.`,
       data: {
         _id: user._id,
@@ -146,7 +145,7 @@ exports.getUsers = async (req, res, next) => {
       .limit(limit)
 
     res.status(200).json({
-      status: 'success',
+      message: 'Users fetched successfully',
       data: {
         users,
         pagination: {
@@ -183,7 +182,6 @@ exports.deleteUser = async (req, res, next) => {
     await User.findByIdAndDelete(userId)
 
     res.status(200).json({
-      status: 'success',
       message: 'User deleted successfully',
     })
   } catch (error) {
@@ -222,7 +220,6 @@ exports.updateUserRole = async (req, res, next) => {
     await user.save()
 
     res.status(200).json({
-      status: 'success',
       message: 'User role updated successfully',
       data: {
         _id: user._id,

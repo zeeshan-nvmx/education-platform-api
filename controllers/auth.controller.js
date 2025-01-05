@@ -158,10 +158,9 @@ exports.signup = async (req, res, next) => {
     }
 
     res.status(201).json({
-      status: 'success',
       message: 'Registration successful. Please verify your email with the OTP sent.',
       token,
-      user: userData,
+      data: userData,
     })
   } catch (error) {
     next(error)
@@ -197,7 +196,6 @@ exports.verifyEmail = async (req, res, next) => {
     await user.save()
 
     res.status(200).json({
-      status: 'success',
       message: 'Email verified successfully',
     })
   } catch (error) {
@@ -237,14 +235,15 @@ exports.login = async (req, res, next) => {
       _id: user._id,
       firstName: user.firstName,
       lastName: user.lastName,
+      role: user.role,
       email: user.email,
       isEmailVerified: user.isEmailVerified,
     }
 
     res.status(200).json({
-      status: 'success',
+      message: 'Login successful',
       token,
-      user: userData,
+      data: userData,
     })
   } catch (error) {
     next(error)
@@ -280,7 +279,6 @@ exports.forgotPassword = async (req, res, next) => {
       await sendPasswordResetOtp(email, resetToken)
 
       res.status(200).json({
-        status: 'success',
         message: 'Password reset code sent to email',
       })
     } catch (error) {
@@ -326,7 +324,6 @@ exports.resetPassword = async (req, res, next) => {
     await user.save()
 
     res.status(200).json({
-      status: 'success',
       message: 'Password reset successful',
     })
   } catch (error) {
@@ -360,7 +357,6 @@ exports.changePassword = async (req, res, next) => {
     await user.save()
 
     res.status(200).json({
-      status: 'success',
       message: 'Password changed successfully',
     })
   } catch (error) {

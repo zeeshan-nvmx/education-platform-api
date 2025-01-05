@@ -29,7 +29,7 @@ exports.getProfile = async (req, res, next) => {
     }
 
     res.status(200).json({
-      status: 'success',
+      message: 'Profile retrieved successfully',
       data: user,
     })
   } catch (error) {
@@ -65,7 +65,7 @@ exports.updateProfile = async (req, res, next) => {
     }
 
     res.status(200).json({
-      status: 'success',
+      message: 'Profile updated successfully',
       data: updatedUser,
     })
   } catch (error) {
@@ -106,7 +106,7 @@ exports.getEnrolledCourses = async (req, res, next) => {
     )
 
     res.status(200).json({
-      status: 'success',
+      message: 'Enrolled courses fetched successfully',
       data: enrolledCourses,
     })
   } catch (error) {
@@ -164,7 +164,7 @@ exports.getCourseProgress = async (req, res, next) => {
     }
 
     res.status(200).json({
-      status: 'success',
+      message: 'Course progress fetched successfully',
       data: progressData,
     })
   } catch (error) {
