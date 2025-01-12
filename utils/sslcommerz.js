@@ -1,4 +1,4 @@
-const SSLCommerzPayment = require('sslcommerz-nodejs')
+const SSLCommerzPayment = require('sslcommerz-lts')
 
 const sslcommerzConfig = {
   store_id: process.env.SSLCOMMERZ_STORE_ID,

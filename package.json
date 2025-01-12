@@ -29,6 +29,8 @@
     "node-fetch": "^2.7.0",
     "nodemailer": "^6.9.16",
     "sanitize-html": "^2.14.0",
+    "sslcommerz-lts": "^1.1.0",
+    "sslcommerz-nodejs": "^1.0.8",
     "xss-clean": "^0.1.4"
   }
 }
