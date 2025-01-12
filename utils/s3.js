@@ -5,8 +5,9 @@ const s3 = new S3Client({
     accessKeyId: process.env.AWS_ACCESS_KEY_ID,
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
   },
-  region: process.env.AWS_REGION,
+  region: 'auto', // R2 uses 'auto' region
   endpoint: process.env.AWS_ENDPOINT,
+  signatureVersion: 'v4', // Required for R2
 })
 
 const uploadToS3 = async (file, key) => {
@@ -20,7 +21,8 @@ const uploadToS3 = async (file, key) => {
   try {
     await s3.send(new PutObjectCommand(params))
 
-    const publicUrl = `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.backblazeb2.com/${key}`
+    // Use your R2 dev URL for public access
+    const publicUrl = `${process.env.AWS_PUBLIC_URL}/${key}`
     return publicUrl
   } catch (err) {
     console.error('Error uploading file to S3:', err)

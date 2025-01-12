@@ -2,6 +2,7 @@ const express = require('express')
 const multer = require('multer')
 const { protect, restrictTo } = require('../middleware/auth')
 const { checkCourseOwnership } = require('../middleware/checkOwnership')
+const validateMongoId = require('../middleware/validateMongoId')
 
 // Configure multer for memory storage
 const upload = multer({
@@ -21,10 +22,22 @@ const upload = multer({
 // Create middleware to handle multiple file uploads
 const uploadFields = upload.fields([
   { name: 'thumbnail', maxCount: 1 },
-  { name: 'instructorImages', maxCount: 10 }, // Allow up to 10 instructor images
+  { name: 'instructorImages', maxCount: 10 },
 ])
 
-const { createCourse, getAllCourses, getCourse, updateCourse, deleteCourse, getFeaturedCourses, getCoursesByCategory } = require('../controllers/course.controller')
+const {
+  createCourse,
+  getAllCourses,
+  getCourse,
+  updateCourse,
+  deleteCourse,
+  getFeaturedCourses,
+  getCoursesByCategory,
+  getCourseModules,
+  checkModuleAccess,
+  getCourseProgress,
+  getModuleProgress,
+} = require('../controllers/course.controller')
 
 const router = express.Router()
 
@@ -32,40 +45,25 @@ const router = express.Router()
 router.get('/featured', getFeaturedCourses)
 router.get('/category/:category', getCoursesByCategory)
 router.get('/', getAllCourses)
-router.get('/:courseId', getCourse)
+router.get('/:courseId', validateMongoId, getCourse)
 
-// Protected routes with admin/subAdmin access
-router.post('/', protect, restrictTo('admin', 'subAdmin'), uploadFields, createCourse)
+// Protected routes
+router.use(protect)
 
-// Protected routes requiring course ownership
-router.put('/:courseId', protect, checkCourseOwnership, uploadFields, updateCourse)
-router.delete('/:courseId', protect, checkCourseOwnership, deleteCourse)
+// Course progress routes
+router.get('/:courseId/progress', validateMongoId, getCourseProgress)
+router.get('/:courseId/modules/:moduleId/progress', validateMongoId, getModuleProgress)
+router.get('/:courseId/modules/:moduleId/access', validateMongoId, checkModuleAccess)
+
+// Course management routes (admin/subAdmin only)
+router.use(restrictTo('admin', 'subAdmin'))
+router.route('/').post(uploadFields, createCourse)
+
+// Routes requiring course ownership
+router.use('/:courseId', validateMongoId, checkCourseOwnership)
+router.route('/:courseId').put(uploadFields, updateCourse).delete(deleteCourse)
+
+// Module routes
+router.get('/:courseId/modules', validateMongoId, getCourseModules)
 
 module.exports = router
-
-// const express = require('express')
-// const { protect, restrictTo } = require('../middleware/auth')
-// const { checkCourseOwnership } = require('../middleware/checkOwnership')
-
-// const { createCourse, getAllCourses, getCourse, updateCourse, deleteCourse, getFeaturedCourses, getCoursesByCategory } = require('../controllers/course.controller')
-
-// const router = express.Router()
-
-// // Public routes
-// router.get('/featured', getFeaturedCourses)
-// router.get('/category/:category', getCoursesByCategory)
-
-// // Protected routes
-// router.use(protect)
-
-// // Routes for admin and subAdmin
-// router.route('/').post(restrictTo('admin', 'subAdmin'), createCourse).get(getAllCourses)
-
-// // Routes requiring course ownership or admin rights
-// router
-//   .route('/:courseId')
-//   .get(getCourse)
-//   .put(checkCourseOwnership, updateCourse)
-//   .delete(checkCourseOwnership, deleteCourse)
-
-// module.exports = router
