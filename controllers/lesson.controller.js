@@ -6,13 +6,18 @@ const CloudflareService = require('../utils/cloudflare')
 
 // Validation Schemas
 const lessonSchema = Joi.object({
-  title: Joi.string().required(),
-  description: Joi.string().allow(''),
+  title: Joi.string().required().trim(),
+  description: Joi.string().allow('').trim(),
   order: Joi.number().integer().min(1).required(),
-  requireQuizPass: Joi.boolean(),
+  requireQuizPass: Joi.boolean().default(false),
 }).options({ abortEarly: false })
 
-const updateLessonSchema = lessonSchema.fork(['title', 'description', 'order', 'requireQuizPass'], (schema) => schema.optional())
+const updateLessonSchema = Joi.object({
+  title: Joi.string().trim(),
+  description: Joi.string().allow('').trim(),
+  order: Joi.number().integer().min(1),
+  requireQuizPass: Joi.boolean(),
+}).options({ abortEarly: false })
 
 const reorderSchema = Joi.object({
   lessonOrders: Joi.array()
@@ -22,7 +27,8 @@ const reorderSchema = Joi.object({
         order: Joi.number().integer().min(1),
       })
     )
-    .required(),
+    .required()
+    .min(1),
 }).options({ abortEarly: false })
 
 // Helper Functions
@@ -43,7 +49,7 @@ async function checkModuleAccess(userId, courseId, moduleId) {
   return enrollment.enrolledModules.some((em) => em.module.toString() === moduleId)
 }
 
-async function updateLessonProgress(userId, courseId, moduleId, lessonId, quizId = null) {
+async function updateProgress(userId, courseId, moduleId, lessonId, quizId = null) {
   const session = await mongoose.startSession()
   session.startTransaction()
 
@@ -77,7 +83,6 @@ async function updateLessonProgress(userId, courseId, moduleId, lessonId, quizId
       }
       progress.lastAccessed = new Date()
 
-      // Update progress percentage
       const totalLessons = await Lesson.countDocuments({
         module: moduleId,
         isDeleted: false,
@@ -119,7 +124,7 @@ async function checkPrerequisites(moduleId, userId) {
   return results.every((result) => result)
 }
 
-// Helper function to handle video upload cleanup
+// Helper function to handle video cleanup
 async function cleanupVideo(cloudflareVideoId) {
   if (cloudflareVideoId) {
     try {
@@ -129,6 +134,8 @@ async function cleanupVideo(cloudflareVideoId) {
     }
   }
 }
+
+// Create Lesson
 exports.createLesson = async (req, res, next) => {
   const session = await mongoose.startSession()
   session.startTransaction()
@@ -145,17 +152,21 @@ exports.createLesson = async (req, res, next) => {
       })
     }
 
-    const moduleId = req.params.moduleId
-    const module = await Module.findById(moduleId).session(session)
+    // Check if module exists
+    const module = await Module.findOne({
+      _id: req.params.moduleId,
+      course: req.params.courseId,
+      isDeleted: false,
+    }).session(session)
 
     if (!module) {
       await session.abortTransaction()
       return next(new AppError('Module not found', 404))
     }
 
-    // Check if order number is already taken
+    // Check for duplicate order
     const existingLesson = await Lesson.findOne({
-      module: moduleId,
+      module: req.params.moduleId,
       order: value.order,
       isDeleted: false,
     }).session(session)
@@ -165,11 +176,12 @@ exports.createLesson = async (req, res, next) => {
       return next(new AppError('A lesson with this order number already exists', 400))
     }
 
+    // Create the lesson
     const lesson = await Lesson.create(
       [
         {
           ...value,
-          module: moduleId,
+          module: req.params.moduleId,
         },
       ],
       { session }
@@ -177,9 +189,11 @@ exports.createLesson = async (req, res, next) => {
 
     await session.commitTransaction()
 
+    // Fetch the created lesson with populated fields
     const populatedLesson = await Lesson.findById(lesson[0]._id).populate({
       path: 'quiz',
       select: 'title type passingScore',
+      match: { isDeleted: false },
     })
 
     res.status(201).json({
@@ -194,30 +208,35 @@ exports.createLesson = async (req, res, next) => {
   }
 }
 
+// Get All Lessons
 exports.getLessons = async (req, res, next) => {
   try {
-    const moduleId = req.params.moduleId
-    const hasAccess = await checkModuleAccess(req.user._id, req.params.courseId, moduleId)
+    // Check module access
+    const hasAccess = await checkModuleAccess(req.user._id, req.params.courseId, req.params.moduleId)
 
     if (!hasAccess) {
       return next(new AppError('You do not have access to this module', 403))
     }
 
+    // Get lessons with quiz information
     const lessons = await Lesson.find({
-      module: moduleId,
+      module: req.params.moduleId,
       isDeleted: false,
     })
       .sort('order')
       .populate({
         path: 'quiz',
         select: 'title type passingScore',
+        match: { isDeleted: false },
       })
 
+    // Get progress if it exists
     const progress = await Progress.findOne({
       user: req.user._id,
-      module: moduleId,
+      module: req.params.moduleId,
     })
 
+    // Add progress information to lessons
     const lessonsWithProgress = lessons.map((lesson) => {
       const lessonObj = lesson.toObject()
       if (progress) {
@@ -238,37 +257,41 @@ exports.getLessons = async (req, res, next) => {
   }
 }
 
+// Get Single Lesson
 exports.getLesson = async (req, res, next) => {
   try {
-    const moduleId = req.params.moduleId
-    const hasAccess = await checkModuleAccess(req.user._id, req.params.courseId, moduleId)
+    // Check module access
+    const hasAccess = await checkModuleAccess(req.user._id, req.params.courseId, req.params.moduleId)
 
     if (!hasAccess) {
       return next(new AppError('You do not have access to this module', 403))
     }
 
+    // Get lesson with quiz
     const lesson = await Lesson.findOne({
       _id: req.params.lessonId,
-      module: moduleId,
+      module: req.params.moduleId,
       isDeleted: false,
     }).populate({
       path: 'quiz',
       select: 'title type passingScore',
+      match: { isDeleted: false },
     })
 
     if (!lesson) {
       return next(new AppError('Lesson not found', 404))
     }
 
-    // Check prerequisites for this lesson's module
-    const prerequisitesMet = await checkPrerequisites(moduleId, req.user._id)
+    // Check prerequisites
+    const prerequisitesMet = await checkPrerequisites(req.params.moduleId, req.user._id)
     if (!prerequisitesMet) {
       return next(new AppError('Module prerequisites not met', 403))
     }
 
+    // Get progress information
     const progress = await Progress.findOne({
       user: req.user._id,
-      module: moduleId,
+      module: req.params.moduleId,
     })
 
     const lessonObj = lesson.toObject()
@@ -278,13 +301,16 @@ exports.getLesson = async (req, res, next) => {
         lessonObj.quiz.completed = progress.completedQuizzes.includes(lesson.quiz._id)
       }
 
-      // Get previous lesson's completion status if this lesson requires quiz pass
+      // Get previous lesson's completion status if quiz is required
       if (lesson.requireQuizPass && lesson.order > 1) {
         const prevLesson = await Lesson.findOne({
-          module: moduleId,
+          module: req.params.moduleId,
           order: lesson.order - 1,
           isDeleted: false,
-        }).populate('quiz')
+        }).populate({
+          path: 'quiz',
+          match: { isDeleted: false },
+        })
 
         if (prevLesson) {
           lessonObj.previousLessonCompleted = progress.completedLessons.includes(prevLesson._id)
@@ -302,6 +328,7 @@ exports.getLesson = async (req, res, next) => {
   }
 }
 
+// Update Lesson
 exports.updateLesson = async (req, res, next) => {
   const session = await mongoose.startSession()
   session.startTransaction()
@@ -318,6 +345,7 @@ exports.updateLesson = async (req, res, next) => {
       })
     }
 
+    // Check for duplicate order if order is being updated
     if (value.order) {
       const existingLesson = await Lesson.findOne({
         module: req.params.moduleId,
@@ -332,6 +360,7 @@ exports.updateLesson = async (req, res, next) => {
       }
     }
 
+    // Update the lesson
     const lesson = await Lesson.findOneAndUpdate(
       {
         _id: req.params.lessonId,
@@ -347,6 +376,7 @@ exports.updateLesson = async (req, res, next) => {
     ).populate({
       path: 'quiz',
       select: 'title type passingScore',
+      match: { isDeleted: false },
     })
 
     if (!lesson) {
@@ -368,6 +398,7 @@ exports.updateLesson = async (req, res, next) => {
   }
 }
 
+// Delete Lesson
 exports.deleteLesson = async (req, res, next) => {
   const session = await mongoose.startSession()
   session.startTransaction()
@@ -395,7 +426,7 @@ exports.deleteLesson = async (req, res, next) => {
       lesson.isDeleted = true
       await lesson.save({ session })
 
-      // Also soft delete associated quiz if exists
+      // Soft delete associated quiz if exists
       if (lesson.quiz) {
         await Quiz.findByIdAndUpdate(lesson.quiz, { isDeleted: true }, { session })
       }
@@ -403,7 +434,7 @@ exports.deleteLesson = async (req, res, next) => {
       // Hard delete if no completions
       await Promise.all([Lesson.deleteOne({ _id: lesson._id }).session(session), Quiz.deleteOne({ lesson: lesson._id }).session(session)])
 
-      // Delete video from Cloudflare if exists
+      // Delete video if exists
       if (lesson.cloudflareVideoId) {
         await cleanupVideo(lesson.cloudflareVideoId)
       }
@@ -433,6 +464,7 @@ exports.deleteLesson = async (req, res, next) => {
   }
 }
 
+// Video Management Functions
 exports.uploadLessonVideo = async (req, res, next) => {
   const session = await mongoose.startSession()
   session.startTransaction()
@@ -458,44 +490,50 @@ exports.uploadLessonVideo = async (req, res, next) => {
       await cleanupVideo(lesson.cloudflareVideoId)
     }
 
-    // Get upload URL from Cloudflare
-    const { uploadUrl, videoId } = await CloudflareService.getUploadUrl()
+    try {
+      // Get upload URL from Cloudflare
+      const { uploadUrl, videoId } = await CloudflareService.getUploadUrl()
 
-    // Upload video to Cloudflare
-    const formData = new FormData()
-    formData.append('file', req.file.buffer, {
-      filename: req.file.originalname,
-      contentType: req.file.mimetype,
-    })
+      // Upload video to Cloudflare
+      const formData = new FormData()
+      formData.append('file', req.file.buffer, {
+        filename: req.file.originalname,
+        contentType: req.file.mimetype,
+      })
 
-    const uploadResponse = await fetch(uploadUrl, {
-      method: 'POST',
-      body: formData,
-    })
+      const uploadResponse = await fetch(uploadUrl, {
+        method: 'POST',
+        body: formData,
+      })
 
-    if (!uploadResponse.ok) {
-      await session.abortTransaction()
-      return next(new AppError('Failed to upload video', 500))
+      if (!uploadResponse.ok) {
+        throw new Error('Failed to upload video to Cloudflare')
+      }
+
+      // Get video details
+      const videoDetails = await CloudflareService.getVideoDetails(videoId)
+
+      // Update lesson with video details
+      lesson.videoUrl = videoDetails.playbackUrl
+      lesson.cloudflareVideoId = videoId
+      lesson.duration = Math.round(videoDetails.duration)
+      await lesson.save({ session })
+
+      await session.commitTransaction()
+
+      res.status(200).json({
+        status: 'success',
+        data: {
+          videoUrl: lesson.videoUrl,
+          duration: lesson.duration,
+        },
+      })
+    } catch (error) {
+      if (lesson.cloudflareVideoId) {
+        await cleanupVideo(lesson.cloudflareVideoId)
+      }
+      throw error
     }
-
-    // Get video details
-    const videoDetails = await CloudflareService.getVideoDetails(videoId)
-
-    // Update lesson with video details
-    lesson.videoUrl = videoDetails.playbackUrl
-    lesson.cloudflareVideoId = videoId
-    lesson.duration = Math.round(videoDetails.duration)
-    await lesson.save({ session })
-
-    await session.commitTransaction()
-
-    res.status(200).json({
-      status: 'success',
-      data: {
-        videoUrl: lesson.videoUrl,
-        duration: lesson.duration,
-      },
-    })
   } catch (error) {
     await session.abortTransaction()
     next(error)
@@ -597,7 +635,7 @@ exports.getVideoStreamUrl = async (req, res, next) => {
       }
     }
 
-    // Get latest video details from Cloudflare
+    // Get video details from Cloudflare
     const videoDetails = await CloudflareService.getVideoDetails(lesson.cloudflareVideoId)
 
     res.status(200).json({
@@ -613,6 +651,7 @@ exports.getVideoStreamUrl = async (req, res, next) => {
   }
 }
 
+// Progress and Quiz Functions
 exports.markLessonComplete = async (req, res, next) => {
   try {
     const moduleId = req.params.moduleId
@@ -651,7 +690,7 @@ exports.markLessonComplete = async (req, res, next) => {
     }
 
     // Update progress
-    await updateLessonProgress(req.user._id, req.params.courseId, moduleId, lesson._id)
+    await updateProgress(req.user._id, req.params.courseId, moduleId, lesson._id)
 
     res.status(200).json({
       status: 'success',
@@ -717,6 +756,51 @@ exports.getLessonProgress = async (req, res, next) => {
   }
 }
 
+exports.getLessonQuiz = async (req, res, next) => {
+  try {
+    const moduleId = req.params.moduleId
+    const hasAccess = await checkModuleAccess(req.user._id, req.params.courseId, moduleId)
+
+    if (!hasAccess) {
+      return next(new AppError('You do not have access to this module', 403))
+    }
+
+    const lesson = await Lesson.findOne({
+      _id: req.params.lessonId,
+      module: moduleId,
+      isDeleted: false,
+    }).populate({
+      path: 'quiz',
+      match: { isDeleted: false },
+      select: '-questions.correctAnswer', // Hide correct answers
+    })
+
+    if (!lesson) {
+      return next(new AppError('Lesson not found', 404))
+    }
+
+    if (!lesson.quiz) {
+      return next(new AppError('No quiz found for this lesson', 404))
+    }
+
+    const progress = await Progress.findOne({
+      user: req.user._id,
+      module: moduleId,
+    })
+
+    const quizData = lesson.quiz.toObject()
+    quizData.completed = progress?.completedQuizzes.includes(lesson.quiz._id) || false
+
+    res.status(200).json({
+      status: 'success',
+      data: quizData,
+    })
+  } catch (error) {
+    next(error)
+  }
+}
+
+// Lesson Reordering
 exports.reorderLessons = async (req, res, next) => {
   const session = await mongoose.startSession()
   session.startTransaction()
@@ -775,49 +859,5 @@ exports.reorderLessons = async (req, res, next) => {
     next(error)
   } finally {
     session.endSession()
-  }
-}
-
-exports.getLessonQuiz = async (req, res, next) => {
-  try {
-    const moduleId = req.params.moduleId
-    const hasAccess = await checkModuleAccess(req.user._id, req.params.courseId, moduleId)
-
-    if (!hasAccess) {
-      return next(new AppError('You do not have access to this module', 403))
-    }
-
-    const lesson = await Lesson.findOne({
-      _id: req.params.lessonId,
-      module: moduleId,
-      isDeleted: false,
-    }).populate({
-      path: 'quiz',
-      match: { isDeleted: false },
-      select: '-questions.correctAnswer', // Hide correct answers
-    })
-
-    if (!lesson) {
-      return next(new AppError('Lesson not found', 404))
-    }
-
-    if (!lesson.quiz) {
-      return next(new AppError('No quiz found for this lesson', 404))
-    }
-
-    const progress = await Progress.findOne({
-      user: req.user._id,
-      module: moduleId,
-    })
-
-    const quizData = lesson.quiz.toObject()
-    quizData.completed = progress?.completedQuizzes.includes(lesson.quiz._id) || false
-
-    res.status(200).json({
-      status: 'success',
-      data: quizData,
-    })
-  } catch (error) {
-    next(error)
   }
 }

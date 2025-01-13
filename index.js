@@ -12,6 +12,8 @@ const { apiLimiter } = require('./middleware/rateLimiter')
 const errorHandler = require('./middleware/error')
 const { AppError } = require('./utils/errors')
 
+const testEnrollmentRouter = require('./routes/testEnrollment.routes')
+
 const app = express()
 let server
 
@@ -50,6 +52,8 @@ app.use('/api/payments', require('./routes/payment.routes'));
 // app.use('/api/discounts', require('./routes/discounts'));
 // app.use('/api/progress', require('./routes/progress'));
 // app.use('/api/reviews', require('./routes/reviews'));
+app.use('/api/test-enrollment', testEnrollmentRouter)
+
 
 // 404 Handler
 app.all('*', (req, res, next) => {

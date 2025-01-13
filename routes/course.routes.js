@@ -57,11 +57,6 @@ router.get('/:courseId', validateMongoId, getCourse)
 // Protected routes
 router.use(protect)
 
-// Course enrollment routes
-router.post('/:courseId/enroll', validateMongoId, enrollInCourse)
-router.post('/:courseId/modules/:moduleId/enroll', validateMongoId, enrollInModule)
-router.get('/:courseId/enrollment-status', validateMongoId, getEnrollmentStatus)
-
 // Course progress routes
 router.get('/:courseId/progress', validateMongoId, getCourseProgress)
 router.get('/:courseId/modules/:moduleId/progress', validateMongoId, getModuleProgress)

@@ -354,13 +354,20 @@ const lessonSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    quiz: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Quiz',
+    },
     isDeleted: {
       type: Boolean,
       default: false,
       index: true,
     },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    strictPopulate: false,
+  }
 )
 
 lessonSchema.pre('find', function () {

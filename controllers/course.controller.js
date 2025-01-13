@@ -479,41 +479,65 @@ exports.getCoursesByCategory = async (req, res, next) => {
 
 exports.getCourseModules = async (req, res, next) => {
   try {
-    const course = await Course.findById(req.params.courseId)
-      .populate({
-        path: 'modules',
-        match: { isDeleted: false },
-        select: 'title description order prerequisites isAccessible dependencies',
-        options: { sort: { order: 1 } }
-      })
+    const course = await Course.findById(req.params.courseId).populate({
+      path: 'modules',
+      match: { isDeleted: false },
+      select: 'title description order prerequisites isAccessible dependencies',
+      options: { sort: { order: 1 } },
+    })
 
     if (!course) {
       return next(new AppError('Course not found', 404))
     }
 
-    const enrollment = req.user.enrolledCourses?.find(
-      e => e.course.toString() === course._id.toString()
-    )
+    const enrollment = req.user.enrolledCourses?.find((e) => e.course.toString() === course._id.toString())
 
-    const modules = course.modules.map(module => {
-      const moduleObj = module.toObject()
-      if (enrollment) {
-        const enrolledModule = enrollment.enrolledModules.find(
-          em => em.module.toString() === module._id.toString()
-        )
-        moduleObj.isEnrolled = !!enrolledModule
-        moduleObj.progress = enrolledModule ? {
-          completedLessons: enrolledModule.completedLessons,
-          completedQuizzes: enrolledModule.completedQuizzes,
-          lastAccessed: enrolledModule.lastAccessed
-        } : null
-      }
-      return moduleObj
-    })
+    if (!enrollment) {
+      return next(new AppError('You are not enrolled in this course', 403))
+    }
+
+    const moduleProgress = await Promise.all(
+      course.modules.map(async (module) => {
+        const moduleObj = module.toObject()
+
+        // Check if user has full course access or is enrolled in this specific module
+        const isFullAccess = enrollment.enrollmentType === 'full'
+        const isModuleEnrolled = enrollment.enrolledModules?.some((em) => em.module.toString() === module._id.toString())
+        moduleObj.isEnrolled = isFullAccess || isModuleEnrolled
+
+        if (moduleObj.isEnrolled) {
+          // Get module-specific progress
+          const progress = await Progress.findOne({
+            user: req.user._id,
+            course: req.params.courseId,
+            module: module._id,
+          })
+
+          if (progress) {
+            moduleObj.progress = {
+              overall: progress.progress,
+              completedLessons: progress.completedLessons,
+              completedQuizzes: progress.completedQuizzes,
+              lastAccessed: progress.lastAccessed,
+            }
+          }
+
+          // Check prerequisites if they exist
+          if (module.prerequisites?.length > 0) {
+            moduleObj.prerequisitesMet = await checkPrerequisites(module.prerequisites, req.user._id, req.params.courseId)
+          }
+        }
+
+        // Add enrollment type for clarity
+        moduleObj.enrollmentType = isFullAccess ? 'full' : isModuleEnrolled ? 'module' : null
+
+        return moduleObj
+      })
+    )
 
     res.status(200).json({
       status: 'success',
-      data: modules
+      data: moduleProgress,
     })
   } catch (error) {
     next(error)
@@ -759,327 +783,3 @@ exports.getModuleProgress = async (req, res, next) => {
     next(error)
   }
 }
-
-// Add to course.controller.js
-
-const enrollmentSchema = Joi.object({
-  discountCode: Joi.string().trim(),
-  redirectUrl: Joi.string().uri().required()
-}).options({ abortEarly: false })
-
-exports.enrollInCourse = async (req, res, next) => {
-  const session = await mongoose.startSession()
-  session.startTransaction()
-
-  try {
-    const { error, value } = enrollmentSchema.validate(req.body)
-    if (error) {
-      return res.status(400).json({
-        status: 'error',
-        errors: error.details.map(detail => ({
-          field: detail.context.key,
-          message: detail.message
-        }))
-      })
-    }
-
-    const course = await Course.findOne({
-      _id: req.params.courseId,
-      isDeleted: false
-    }).session(session)
-
-    if (!course) {
-      await session.abortTransaction()
-      return next(new AppError('Course not found', 404))
-    }
-
-    // Check if user is already enrolled
-    const isEnrolled = await User.findOne({
-      _id: req.user._id,
-      'enrolledCourses.course': course._id,
-      'enrolledCourses.enrollmentType': 'full'
-    }).session(session)
-
-    if (isEnrolled) {
-      await session.abortTransaction()
-      return next(new AppError('You are already enrolled in this course', 400))
-    }
-
-    // Calculate price with discount if code provided
-    const { discountedAmount, discount } = await calculateDiscountedAmount(
-      course.price,
-      value.discountCode,
-      course._id
-    )
-
-    // Generate transaction ID
-    const transactionId = crypto.randomBytes(16).toString('hex')
-
-    // Create payment record
-    const payment = await Payment.create([{
-      user: req.user._id,
-      course: course._id,
-      purchaseType: 'course',
-      amount: course.price,
-      discount,
-      discountedAmount,
-      transactionId,
-      status: 'pending'
-    }], { session })
-
-    // Prepare SSLCommerz data
-    const sslData = {
-      total_amount: discountedAmount,
-      currency: 'BDT',
-      tran_id: transactionId,
-      success_url: `${value.redirectUrl}?status=success&tran_id=${transactionId}`,
-      fail_url: `${value.redirectUrl}?status=fail&tran_id=${transactionId}`,
-      cancel_url: `${value.redirectUrl}?status=cancel&tran_id=${transactionId}`,
-      ipn_url: `${process.env.API_URL}/api/payments/ipn`,
-      shipping_method: 'NO',
-      product_name: course.title,
-      product_category: 'Course',
-      product_profile: 'general',
-      cus_name: `${req.user.firstName} ${req.user.lastName}`,
-      cus_email: req.user.email,
-      cus_add1: 'Customer Address',
-      cus_city: 'Customer City',
-      cus_country: 'Bangladesh'
-    }
-
-    // Initiate SSLCommerz payment
-    const sslResponse = await initiatePayment(sslData)
-
-    // Update payment record with SSLCommerz session
-    await Payment.findByIdAndUpdate(
-      payment[0]._id,
-      { sslcommerzSessionKey: sslResponse.sessionkey },
-      { session }
-    )
-
-    await session.commitTransaction()
-
-    res.status(200).json({
-      status: 'success',
-      data: {
-        gatewayRedirectUrl: sslResponse.GatewayPageURL,
-        transactionId
-      }
-    })
-  } catch (error) {
-    await session.abortTransaction()
-    next(error)
-  } finally {
-    session.endSession()
-  }
-}
-
-exports.enrollInModule = async (req, res, next) => {
-  const session = await mongoose.startSession()
-  session.startTransaction()
-
-  try {
-    const { error, value } = enrollmentSchema.validate(req.body)
-    if (error) {
-      return res.status(400).json({
-        status: 'error',
-        errors: error.details.map(detail => ({
-          field: detail.context.key,
-          message: detail.message
-        }))
-      })
-    }
-
-    const [course, module] = await Promise.all([
-      Course.findOne({
-        _id: req.params.courseId,
-        isDeleted: false
-      }).session(session),
-      Module.findOne({
-        _id: req.params.moduleId,
-        course: req.params.courseId,
-        isDeleted: false
-      }).session(session)
-    ])
-
-    if (!course || !module) {
-      await session.abortTransaction()
-      return next(new AppError('Course or module not found', 404))
-    }
-
-    // Check if user is already enrolled in course or module
-    const enrollment = await User.findOne({
-      _id: req.user._id,
-      'enrolledCourses.course': course._id
-    }).session(session)
-
-    if (enrollment?.enrolledCourses[0].enrollmentType === 'full') {
-      await session.abortTransaction()
-      return next(new AppError('You already have full access to this course', 400))
-    }
-
-    if (enrollment?.enrolledCourses[0].enrolledModules.some(
-      em => em.module.toString() === module._id.toString()
-    )) {
-      await session.abortTransaction()
-      return next(new AppError('You are already enrolled in this module', 400))
-    }
-
-    // Calculate price with discount if code provided
-    const { discountedAmount, discount } = await calculateDiscountedAmount(
-      course.modulePrice,
-      value.discountCode,
-      course._id,
-      module._id
-    )
-
-    // Generate transaction ID
-    const transactionId = crypto.randomBytes(16).toString('hex')
-
-    // Create payment record
-    const payment = await Payment.create([{
-      user: req.user._id,
-      course: course._id,
-      purchaseType: 'module',
-      modules: [module._id],
-      amount: course.modulePrice,
-      discount,
-      discountedAmount,
-      transactionId,
-      status: 'pending'
-    }], { session })
-
-    // Prepare SSLCommerz data
-    const sslData = {
-      total_amount: discountedAmount,
-      currency: 'BDT',
-      tran_id: transactionId,
-      success_url: `${value.redirectUrl}?status=success&tran_id=${transactionId}`,
-      fail_url: `${value.redirectUrl}?status=fail&tran_id=${transactionId}`,
-      cancel_url: `${value.redirectUrl}?status=cancel&tran_id=${transactionId}`,
-      ipn_url: `${process.env.API_URL}/api/payments/ipn`,
-      shipping_method: 'NO',
-      product_name: `${course.title} - ${module.title}`,
-      product_category: 'Course Module',
-      product_profile: 'general',
-      cus_name: `${req.user.firstName} ${req.user.lastName}`,
-      cus_email: req.user.email,
-      cus_add1: 'Customer Address',
-      cus_city: 'Customer City',
-      cus_country: 'Bangladesh'
-    }
-
-    // Initiate SSLCommerz payment
-    const sslResponse = await initiatePayment(sslData)
-
-    // Update payment record with SSLCommerz session
-    await Payment.findByIdAndUpdate(
-      payment[0]._id,
-      { sslcommerzSessionKey: sslResponse.sessionkey },
-      { session }
-    )
-
-    await session.commitTransaction()
-
-    res.status(200).json({
-      status: 'success',
-      data: {
-        gatewayRedirectUrl: sslResponse.GatewayPageURL,
-        transactionId
-      }
-    })
-  } catch (error) {
-    await session.abortTransaction()
-    next(error)
-  } finally {
-    session.endSession()
-  }
-}
-
-exports.getEnrollmentStatus = async (req, res, next) => {
-  try {
-    const course = await Course.findOne({
-      _id: req.params.courseId,
-      isDeleted: false
-    })
-    .populate({
-      path: 'modules',
-      match: { isDeleted: false },
-      select: 'title order prerequisites'
-    })
-
-    if (!course) {
-      return next(new AppError('Course not found', 404))
-    }
-
-    const enrollment = await User.findOne(
-      {
-        _id: req.user._id,
-        'enrolledCourses.course': course._id
-      },
-      { 'enrolledCourses.$': 1 }
-    )
-
-    if (!enrollment) {
-      return res.status(200).json({
-        status: 'success',
-        data: {
-          isEnrolled: false,
-          coursePrice: course.price,
-          modulePrice: course.modulePrice
-        }
-      })
-    }
-
-    const enrolledCourse = enrollment.enrolledCourses[0]
-    const moduleEnrollments = course.modules.map(module => ({
-      moduleId: module._id,
-      title: module.title,
-      order: module.order,
-      isEnrolled: enrolledCourse.enrollmentType === 'full' ||
-        enrolledCourse.enrolledModules.some(em => 
-          em.module.toString() === module._id.toString()
-        ),
-      price: course.modulePrice,
-      prerequisites: module.prerequisites
-    }))
-
-    res.status(200).json({
-      status: 'success',
-      data: {
-        isEnrolled: true,
-        enrollmentType: enrolledCourse.enrollmentType,
-        enrolledAt: enrolledCourse.enrolledAt,
-        modules: moduleEnrollments
-      }
-    })
-  } catch (error) {
-    next(error)
-  }
-}
-
-// Helper function to check prerequisites
-async function checkPrerequisites(prerequisites, enrollment) {
-  for (const prereqId of prerequisites) {
-    const moduleEnrollment = enrollment.enrolledModules.find(
-      em => em.module.toString() === prereqId.toString()
-    )
-    
-    if (!moduleEnrollment) return false
-
-    const prerequisite = await Module.findById(prereqId)
-    const totalLessons = await Lesson.countDocuments({
-      module: prereqId,
-      isDeleted: false
-    })
-
-    const completionPercentage = (moduleEnrollment.completedLessons.length / totalLessons) * 100
-    
-    if (completionPercentage < (prerequisite.dependencies?.[0]?.requiredCompletion || 100)) {
-      return false
-    }
-  }
-  
-  return true
-}
-

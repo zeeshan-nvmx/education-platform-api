@@ -1,3 +1,4 @@
+// module.controller.js
 const Joi = require('joi')
 const mongoose = require('mongoose')
 const { Module, Course, Lesson, User, Progress } = require('../models')
@@ -5,10 +6,10 @@ const { AppError } = require('../utils/errors')
 
 // Validation Schemas
 const moduleSchema = Joi.object({
-  title: Joi.string().required(),
-  description: Joi.string().allow(''),
+  title: Joi.string().required().trim(),
+  description: Joi.string().allow('').trim(),
   order: Joi.number().integer().min(1).required(),
-  isAccessible: Joi.boolean(),
+  isAccessible: Joi.boolean().default(true),
   prerequisites: Joi.array().items(Joi.string().regex(/^[0-9a-fA-F]{24}$/)),
   dependencies: Joi.array().items(
     Joi.object({
@@ -18,7 +19,19 @@ const moduleSchema = Joi.object({
   ),
 }).options({ abortEarly: false })
 
-const updateModuleSchema = moduleSchema.fork(['title', 'description', 'order', 'isAccessible', 'prerequisites', 'dependencies'], (schema) => schema.optional())
+const updateModuleSchema = Joi.object({
+  title: Joi.string().trim(),
+  description: Joi.string().allow('').trim(),
+  order: Joi.number().integer().min(1),
+  isAccessible: Joi.boolean(),
+  prerequisites: Joi.array().items(Joi.string().regex(/^[0-9a-fA-F]{24}$/)),
+  dependencies: Joi.array().items(
+    Joi.object({
+      module: Joi.string().regex(/^[0-9a-fA-F]{24}$/),
+      requiredCompletion: Joi.number().min(0).max(100),
+    })
+  ),
+}).options({ abortEarly: false })
 
 const prerequisitesSchema = Joi.object({
   prerequisites: Joi.array()
@@ -40,10 +53,11 @@ const reorderSchema = Joi.object({
         order: Joi.number().integer().min(1),
       })
     )
-    .required(),
+    .required()
+    .min(1),
 }).options({ abortEarly: false })
 
-// Helper function to check for circular dependencies
+// Helper Functions
 async function hasCircularDependency(prerequisites, courseId, currentModuleId = null) {
   const visited = new Set()
   const recursionStack = new Set()
@@ -91,7 +105,6 @@ async function hasCircularDependency(prerequisites, courseId, currentModuleId = 
   return false
 }
 
-// Helper function to check prerequisites completion
 async function checkPrerequisitesCompletion(prerequisites, userId, courseId) {
   const results = await Promise.all(
     prerequisites.map(async (prereqId) => {
@@ -104,7 +117,8 @@ async function checkPrerequisitesCompletion(prerequisites, userId, courseId) {
       if (!progress) return false
 
       const module = await Module.findById(prereqId)
-      const requiredCompletion = module.dependencies?.[0]?.requiredCompletion || 100
+      const dependency = module.dependencies?.find((d) => d.module.toString() === prereqId.toString())
+      const requiredCompletion = dependency?.requiredCompletion || 100
 
       return progress.progress >= requiredCompletion
     })
@@ -113,6 +127,26 @@ async function checkPrerequisitesCompletion(prerequisites, userId, courseId) {
   return results.every((result) => result)
 }
 
+// Check if user has access to module (either full course or specific module)
+async function hasModuleAccess(userId, courseId, moduleId) {
+  const user = await User.findById(userId)
+
+  if (!user) return false
+
+  const enrollment = user.enrolledCourses.find((ec) => ec.course.toString() === courseId)
+
+  if (!enrollment) return false
+
+  // Check for full course access
+  if (enrollment.enrollmentType === 'full') {
+    return true
+  }
+
+  // Check for specific module access
+  return enrollment.enrolledModules.some((em) => em.module.toString() === moduleId)
+}
+
+// Create Module
 exports.createModule = async (req, res, next) => {
   const session = await mongoose.startSession()
   session.startTransaction()
@@ -122,17 +156,18 @@ exports.createModule = async (req, res, next) => {
     if (error) {
       return res.status(400).json({
         status: 'error',
-        errors: error.details.map((detail) => ({
+        errors: error.details.map(detail => ({
           field: detail.context.key,
-          message: detail.message,
-        })),
+          message: detail.message
+        }))
       })
     }
 
+    // Check for existing module with same order
     const existingModule = await Module.findOne({
       course: req.params.courseId,
       order: value.order,
-      isDeleted: false,
+      isDeleted: false
     }).session(session)
 
     if (existingModule) {
@@ -140,11 +175,12 @@ exports.createModule = async (req, res, next) => {
       return next(new AppError('A module with this order number already exists', 400))
     }
 
+    // Validate prerequisites if provided
     if (value.prerequisites?.length > 0) {
       const prereqModules = await Module.find({
         _id: { $in: value.prerequisites },
         course: req.params.courseId,
-        isDeleted: false,
+        isDeleted: false
       }).session(session)
 
       if (prereqModules.length !== value.prerequisites.length) {
@@ -158,32 +194,32 @@ exports.createModule = async (req, res, next) => {
       }
     }
 
-    const module = await Module.create(
-      [
-        {
-          ...value,
-          course: req.params.courseId,
-        },
-      ],
-      { session }
-    )
+    // Create module
+    const module = await Module.create([{
+      ...value,
+      course: req.params.courseId
+    }], { session })
 
     await session.commitTransaction()
 
-    const populatedModule = await Module.findById(module[0]._id).populate([
-      {
-        path: 'prerequisites',
-        select: 'title order',
-      },
-      {
-        path: 'dependencies.module',
-        select: 'title order',
-      },
-    ])
+    // Populate references
+    const populatedModule = await Module.findById(module[0]._id)
+      .populate([
+        {
+          path: 'prerequisites',
+          select: 'title order',
+          match: { isDeleted: false }
+        },
+        {
+          path: 'dependencies.module',
+          select: 'title order',
+          match: { isDeleted: false }
+        }
+      ])
 
     res.status(201).json({
       status: 'success',
-      data: populatedModule,
+      data: populatedModule
     })
   } catch (error) {
     await session.abortTransaction()
@@ -193,28 +229,32 @@ exports.createModule = async (req, res, next) => {
   }
 }
 
+// Get All Modules
 exports.getModules = async (req, res, next) => {
   try {
     const modules = await Module.find({
       course: req.params.courseId,
-      isDeleted: false,
+      isDeleted: false
     })
       .populate([
         {
           path: 'prerequisites',
           select: 'title order',
+          match: { isDeleted: false }
         },
         {
           path: 'dependencies.module',
           select: 'title order',
-        },
+          match: { isDeleted: false }
+        }
       ])
       .sort('order')
 
+    // Get enrollment status for all modules
     const enrollment = await User.findOne(
       {
         _id: req.user._id,
-        'enrolledCourses.course': req.params.courseId,
+        'enrolledCourses.course': req.params.courseId
       },
       { 'enrolledCourses.$': 1 }
     )
@@ -225,31 +265,39 @@ exports.getModules = async (req, res, next) => {
 
         if (enrollment) {
           const enrolledCourse = enrollment.enrolledCourses[0]
-          const hasAccess = enrolledCourse.enrollmentType === 'full' || enrolledCourse.enrolledModules.some((em) => em.module.toString() === module._id.toString())
-
-          const progress = hasAccess
-            ? await Progress.findOne({
-                user: req.user._id,
-                course: req.params.courseId,
-                module: module._id,
-              })
-            : null
+          const hasFullAccess = enrolledCourse.enrollmentType === 'full'
+          const hasModuleAccess = enrolledCourse.enrolledModules.some(
+            em => em.module.toString() === module._id.toString()
+          )
 
           moduleObj.enrollment = {
-            hasAccess,
-            type: enrolledCourse.enrollmentType,
-            progress: progress
-              ? {
-                  overall: progress.progress,
-                  completedLessons: progress.completedLessons,
-                  completedQuizzes: progress.completedQuizzes,
-                  lastAccessed: progress.lastAccessed,
-                }
-              : null,
+            hasAccess: hasFullAccess || hasModuleAccess,
+            type: enrolledCourse.enrollmentType
+          }
+
+          if (hasFullAccess || hasModuleAccess) {
+            const progress = await Progress.findOne({
+              user: req.user._id,
+              course: req.params.courseId,
+              module: module._id
+            })
+
+            if (progress) {
+              moduleObj.enrollment.progress = {
+                overall: progress.progress,
+                completedLessons: progress.completedLessons,
+                completedQuizzes: progress.completedQuizzes,
+                lastAccessed: progress.lastAccessed
+              }
+            }
           }
 
           if (module.prerequisites?.length > 0) {
-            moduleObj.prerequisitesMet = await checkPrerequisitesCompletion(module.prerequisites, req.user._id, req.params.courseId)
+            moduleObj.prerequisitesMet = await checkPrerequisitesCompletion(
+              module.prerequisites,
+              req.user._id,
+              req.params.courseId
+            )
           }
         }
 
@@ -259,12 +307,14 @@ exports.getModules = async (req, res, next) => {
 
     res.status(200).json({
       status: 'success',
-      data: modulesWithStatus,
+      data: modulesWithStatus
     })
   } catch (error) {
     next(error)
   }
 }
+
+// Get Single Module
 exports.getModule = async (req, res, next) => {
   try {
     const module = await Module.findOne({
@@ -289,7 +339,8 @@ exports.getModule = async (req, res, next) => {
         options: { sort: { order: 1 } },
         populate: {
           path: 'quiz',
-          select: 'title type passingScore'
+          select: 'title type passingScore',
+          match: { isDeleted: false }
         }
       }
     ])
@@ -298,6 +349,7 @@ exports.getModule = async (req, res, next) => {
       return next(new AppError('Module not found', 404))
     }
 
+    // Get enrollment and progress information
     const enrollment = await User.findOne(
       {
         _id: req.user._id,
@@ -310,12 +362,12 @@ exports.getModule = async (req, res, next) => {
 
     if (enrollment) {
       const enrolledCourse = enrollment.enrolledCourses[0]
-      const hasAccess = enrolledCourse.enrollmentType === 'full' ||
-        enrolledCourse.enrolledModules.some(em => 
-          em.module.toString() === module._id.toString()
-        )
+      const hasFullAccess = enrolledCourse.enrollmentType === 'full'
+      const hasModuleAccess = enrolledCourse.enrolledModules.some(
+        em => em.module.toString() === module._id.toString()
+      )
 
-      if (hasAccess) {
+      if (hasFullAccess || hasModuleAccess) {
         const progress = await Progress.findOne({
           user: req.user._id,
           course: req.params.courseId,
@@ -362,6 +414,7 @@ exports.getModule = async (req, res, next) => {
   }
 }
 
+// Update Module
 exports.updateModule = async (req, res, next) => {
   const session = await mongoose.startSession()
   session.startTransaction()
@@ -404,7 +457,11 @@ exports.updateModule = async (req, res, next) => {
         return next(new AppError('One or more prerequisites are invalid', 400))
       }
 
-      if (await hasCircularDependency(value.prerequisites, req.params.courseId, req.params.moduleId)) {
+      if (await hasCircularDependency(
+        value.prerequisites, 
+        req.params.courseId, 
+        req.params.moduleId
+      )) {
         await session.abortTransaction()
         return next(new AppError('Circular dependency detected in prerequisites', 400))
       }
@@ -452,6 +509,7 @@ exports.updateModule = async (req, res, next) => {
   }
 }
 
+// Delete Module
 exports.deleteModule = async (req, res, next) => {
   const session = await mongoose.startSession()
   session.startTransaction()
@@ -468,7 +526,7 @@ exports.deleteModule = async (req, res, next) => {
       return next(new AppError('Module not found', 404))
     }
 
-    // Check if any students are enrolled in this module
+    // Check if any students are enrolled
     const enrolledStudents = await User.countDocuments({
       $or: [
         { 'enrolledCourses.enrollmentType': 'full', 'enrolledCourses.course': req.params.courseId },
@@ -534,6 +592,7 @@ exports.deleteModule = async (req, res, next) => {
   }
 }
 
+// Get Module Lessons
 exports.getModuleLessons = async (req, res, next) => {
   try {
     const module = await Module.findOne({
@@ -547,7 +606,8 @@ exports.getModuleLessons = async (req, res, next) => {
       options: { sort: { order: 1 } },
       populate: {
         path: 'quiz',
-        select: 'title type passingScore'
+        select: 'title type passingScore',
+        match: { isDeleted: false }
       }
     })
 
@@ -555,23 +615,11 @@ exports.getModuleLessons = async (req, res, next) => {
       return next(new AppError('Module not found', 404))
     }
 
-    const enrollment = await User.findOne(
-      {
-        _id: req.user._id,
-        'enrolledCourses.course': req.params.courseId
-      },
-      { 'enrolledCourses.$': 1 }
+    const hasAccess = await hasModuleAccess(
+      req.user._id,
+      req.params.courseId,
+      req.params.moduleId
     )
-
-    if (!enrollment) {
-      return next(new AppError('You are not enrolled in this course', 403))
-    }
-
-    const enrolledCourse = enrollment.enrolledCourses[0]
-    const hasAccess = enrolledCourse.enrollmentType === 'full' ||
-      enrolledCourse.enrolledModules.some(em => 
-        em.module.toString() === module._id.toString()
-      )
 
     if (!hasAccess) {
       return next(new AppError('You do not have access to this module', 403))
@@ -580,7 +628,7 @@ exports.getModuleLessons = async (req, res, next) => {
     const progress = await Progress.findOne({
       user: req.user._id,
       course: req.params.courseId,
-      module: module._id
+      module: req.params.moduleId
     })
 
     const lessons = module.lessons.map(lesson => {
@@ -603,6 +651,7 @@ exports.getModuleLessons = async (req, res, next) => {
   }
 }
 
+// Reorder Modules
 exports.reorderModules = async (req, res, next) => {
   const session = await mongoose.startSession()
   session.startTransaction()
@@ -681,6 +730,7 @@ exports.reorderModules = async (req, res, next) => {
   }
 }
 
+// Update Module Prerequisites
 exports.updateModulePrerequisites = async (req, res, next) => {
   const session = await mongoose.startSession()
   session.startTransaction()
@@ -762,12 +812,13 @@ exports.updateModulePrerequisites = async (req, res, next) => {
   }
 }
 
+// Get Module Enrollment Status
 exports.getModuleEnrollmentStatus = async (req, res, next) => {
   try {
     const module = await Module.findOne({
       _id: req.params.moduleId,
       course: req.params.courseId,
-      isDeleted: false,
+      isDeleted: false
     }).populate('prerequisites', 'title order')
 
     if (!module) {
@@ -777,7 +828,7 @@ exports.getModuleEnrollmentStatus = async (req, res, next) => {
     const enrollment = await User.findOne(
       {
         _id: req.user._id,
-        'enrolledCourses.course': req.params.courseId,
+        'enrolledCourses.course': req.params.courseId
       },
       { 'enrolledCourses.$': 1 }
     )
@@ -787,13 +838,14 @@ exports.getModuleEnrollmentStatus = async (req, res, next) => {
         status: 'success',
         data: {
           hasAccess: false,
-          reason: 'not_enrolled_in_course',
-        },
+          reason: 'not_enrolled_in_course'
+        }
       })
     }
 
     const enrolledCourse = enrollment.enrolledCourses[0]
-    const hasAccess = enrolledCourse.enrollmentType === 'full' || enrolledCourse.enrolledModules.some((em) => em.module.toString() === module._id.toString())
+    const hasAccess = enrolledCourse.enrollmentType === 'full' || 
+      enrolledCourse.enrolledModules.some(em => em.module.toString() === module._id.toString())
 
     if (!hasAccess) {
       return res.status(200).json({
@@ -801,8 +853,8 @@ exports.getModuleEnrollmentStatus = async (req, res, next) => {
         data: {
           hasAccess: false,
           reason: 'module_not_purchased',
-          enrollmentType: enrolledCourse.enrollmentType,
-        },
+          enrollmentType: enrolledCourse.enrollmentType
+        }
       })
     }
 
@@ -810,15 +862,16 @@ exports.getModuleEnrollmentStatus = async (req, res, next) => {
     let prerequisitesStatus = null
     if (module.prerequisites?.length > 0) {
       prerequisitesStatus = await Promise.all(
-        module.prerequisites.map(async (prereq) => {
+        module.prerequisites.map(async prereq => {
           const progress = await Progress.findOne({
             user: req.user._id,
             course: req.params.courseId,
-            module: prereq._id,
+            module: prereq._id
           })
 
-          const dependency = module.dependencies?.find((d) => d.module.toString() === prereq._id.toString())
-
+          const dependency = module.dependencies?.find(d => 
+            d.module.toString() === prereq._id.toString()
+          )
           const requiredCompletion = dependency?.requiredCompletion || 100
 
           return {
@@ -827,7 +880,7 @@ exports.getModuleEnrollmentStatus = async (req, res, next) => {
             order: prereq.order,
             required: requiredCompletion,
             completed: progress?.progress || 0,
-            isMet: (progress?.progress || 0) >= requiredCompletion,
+            isMet: (progress?.progress || 0) >= requiredCompletion
           }
         })
       )
@@ -837,7 +890,7 @@ exports.getModuleEnrollmentStatus = async (req, res, next) => {
     const progress = await Progress.findOne({
       user: req.user._id,
       course: req.params.courseId,
-      module: module._id,
+      module: module._id
     })
 
     res.status(200).json({
@@ -845,24 +898,19 @@ exports.getModuleEnrollmentStatus = async (req, res, next) => {
       data: {
         hasAccess: true,
         enrollmentType: enrolledCourse.enrollmentType,
-        progress: progress
-          ? {
-              overall: progress.progress,
-              completedLessons: progress.completedLessons.length,
-              totalLessons:
-                progress.completedLessons.length +
-                (await Lesson.countDocuments({
-                  module: module._id,
-                  _id: { $nin: progress.completedLessons },
-                  isDeleted: false,
-                })),
-              completedQuizzes: progress.completedQuizzes.length,
-              lastAccessed: progress.lastAccessed,
-            }
-          : null,
+        progress: progress ? {
+          overall: progress.progress,
+          completedLessons: progress.completedLessons.length,
+          totalLessons: await Lesson.countDocuments({
+            module: module._id,
+            isDeleted: false
+          }),
+          completedQuizzes: progress.completedQuizzes.length,
+          lastAccessed: progress.lastAccessed
+        } : null,
         prerequisites: prerequisitesStatus,
-        prerequisitesMet: !prerequisitesStatus || prerequisitesStatus.every((p) => p.isMet),
-      },
+        prerequisitesMet: !prerequisitesStatus || prerequisitesStatus.every(p => p.isMet)
+      }
     })
   } catch (error) {
     next(error)
