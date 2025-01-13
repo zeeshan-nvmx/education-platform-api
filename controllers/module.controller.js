@@ -155,7 +155,7 @@ exports.createModule = async (req, res, next) => {
     const { error, value } = moduleSchema.validate(req.body)
     if (error) {
       return res.status(400).json({
-        status: 'error',
+        message: 'Validation failed',
         errors: error.details.map(detail => ({
           field: detail.context.key,
           message: detail.message
@@ -218,7 +218,7 @@ exports.createModule = async (req, res, next) => {
       ])
 
     res.status(201).json({
-      status: 'success',
+      message: 'module created successfully',
       data: populatedModule
     })
   } catch (error) {
@@ -306,7 +306,7 @@ exports.getModules = async (req, res, next) => {
     )
 
     res.status(200).json({
-      status: 'success',
+      message: 'Modules fetched successfully',
       data: modulesWithStatus
     })
   } catch (error) {
@@ -406,7 +406,7 @@ exports.getModule = async (req, res, next) => {
     }
 
     res.status(200).json({
-      status: 'success',
+      message: 'Module fetched successfully',
       data: moduleObj
     })
   } catch (error) {
@@ -498,7 +498,7 @@ exports.updateModule = async (req, res, next) => {
     await session.commitTransaction()
 
     res.status(200).json({
-      status: 'success',
+      message: 'Module updated successfully',
       data: module
     })
   } catch (error) {
@@ -581,7 +581,6 @@ exports.deleteModule = async (req, res, next) => {
     await session.commitTransaction()
 
     res.status(200).json({
-      status: 'success',
       message: 'Module deleted successfully'
     })
   } catch (error) {
@@ -643,7 +642,7 @@ exports.getModuleLessons = async (req, res, next) => {
     })
 
     res.status(200).json({
-      status: 'success',
+      message: 'Lessons fetched successfully',
       data: lessons
     })
   } catch (error) {
@@ -719,7 +718,7 @@ exports.reorderModules = async (req, res, next) => {
     ])
 
     res.status(200).json({
-      status: 'success',
+      message: 'Modules reordered successfully',
       data: updatedModules
     })
   } catch (error) {
@@ -801,7 +800,7 @@ exports.updateModulePrerequisites = async (req, res, next) => {
     await session.commitTransaction()
 
     res.status(200).json({
-      status: 'success',
+      message: 'Module prerequisites updated successfully',
       data: module
     })
   } catch (error) {
@@ -894,7 +893,7 @@ exports.getModuleEnrollmentStatus = async (req, res, next) => {
     })
 
     res.status(200).json({
-      status: 'success',
+      message: 'Module enrollment status fetched successfully',
       data: {
         hasAccess: true,
         enrollmentType: enrolledCourse.enrollmentType,

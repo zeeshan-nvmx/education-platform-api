@@ -158,7 +158,7 @@ exports.signup = async (req, res, next) => {
     }
 
     res.status(201).json({
-      message: 'Registration successful. Please verify your email with the OTP sent.',
+      message: 'Registration successful. Please verify your email with the sent otp.',
       token,
       data: userData,
     })

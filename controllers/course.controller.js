@@ -122,7 +122,7 @@ exports.createCourse = async (req, res, next) => {
       .populate('creator', 'firstName lastName email')
 
     res.status(201).json({
-      status: 'success',
+      message: 'Course created successfully',
       data: populatedCourse
     })
   } catch (error) {
@@ -179,7 +179,7 @@ exports.getAllCourses = async (req, res, next) => {
     const totalPages = Math.ceil(totalCourses / limit)
 
     res.status(200).json({
-      status: 'success',
+      message: 'Courses fetched successfully',
       data: {
         courses,
         pagination: {
@@ -248,13 +248,13 @@ exports.getCourse = async (req, res, next) => {
       }
 
       return res.status(200).json({
-        status: 'success',
+        message: 'Course fetched successfully',
         data: limitedCourse
       })
     }
 
     res.status(200).json({
-      status: 'success',
+      message: 'Course fetched successfully',
       data: {
         ...course.toObject(),
         enrollmentType: enrollment?.enrollmentType,
@@ -352,7 +352,7 @@ exports.updateCourse = async (req, res, next) => {
     ).populate('creator', 'firstName lastName email')
 
     res.status(200).json({
-      status: 'success',
+      message: 'Course updated successfully',
       data: updatedCourse
     })
   } catch (error) {
@@ -411,7 +411,6 @@ exports.deleteCourse = async (req, res, next) => {
     await session.commitTransaction()
 
     res.status(200).json({
-      status: 'success',
       message: 'Course deleted successfully'
     })
   } catch (error) {
@@ -432,7 +431,7 @@ exports.getFeaturedCourses = async (req, res, next) => {
       .lean()
 
     res.status(200).json({
-      status: 'success',
+      message: 'Featured courses fetched successfully',
       data: courses
     })
   } catch (error) {
@@ -460,7 +459,7 @@ exports.getCoursesByCategory = async (req, res, next) => {
     const totalPages = Math.ceil(totalCourses / limit)
 
     res.status(200).json({
-      status: 'success',
+      message: 'Courses fetched successfully',
       data: {
         courses,
         pagination: {
@@ -536,7 +535,7 @@ exports.getCourseModules = async (req, res, next) => {
     )
 
     res.status(200).json({
-      status: 'success',
+      message: 'Course modules fetched successfully',
       data: moduleProgress,
     })
   } catch (error) {
@@ -580,7 +579,7 @@ exports.checkModuleAccess = async (req, res, next) => {
     // Check if user has full course access
     if (enrollment.enrollmentType === 'full') {
       return res.status(200).json({
-        status: 'success',
+        message: 'User has full access to this course',
         data: {
           hasAccess: true,
           enrollmentType: 'full'
@@ -595,7 +594,7 @@ exports.checkModuleAccess = async (req, res, next) => {
 
     if (!moduleEnrollment) {
       return res.status(200).json({
-        status: 'success',
+        message: 'Module not found',
         data: {
           hasAccess: false,
           reason: 'module_not_purchased'
@@ -608,7 +607,7 @@ exports.checkModuleAccess = async (req, res, next) => {
       const prerequisitesMet = await checkPrerequisites(module.prerequisites, enrollment)
       if (!prerequisitesMet) {
         return res.status(200).json({
-          status: 'success',
+          message: 'User does not meet prerequisites for this module',
           data: {
             hasAccess: false,
             reason: 'prerequisites_not_met'
@@ -618,7 +617,7 @@ exports.checkModuleAccess = async (req, res, next) => {
     }
 
     res.status(200).json({
-      status: 'success',
+      message: "User has access to this module",
       data: {
         hasAccess: true,
         enrollmentType: 'module',
@@ -693,7 +692,7 @@ exports.getCourseProgress = async (req, res, next) => {
     )
 
     res.status(200).json({
-      status: 'success',
+      message: 'Course progress fetched successfully',
       data: {
         enrollmentType: enrollment.enrollmentType,
         overallProgress: totalLessons > 0
@@ -765,7 +764,7 @@ exports.getModuleProgress = async (req, res, next) => {
     }))
 
     res.status(200).json({
-      status: 'success',
+      message: 'Module progress fetched successfully',
       data: {
         moduleId: module._id,
         title: module.title,
