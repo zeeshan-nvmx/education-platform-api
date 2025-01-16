@@ -7,7 +7,7 @@ const router = express.Router()
 
 router.post('/signup', signup)
 router.post('/verify-email', verifyEmail)
-router.post('/login', login)
+router.post('/login', loginLimiter, login)
 router.post('/forgot-password', forgotPassword)
 router.post('/reset-password', resetPassword)
 router.post('/change-password', protect, changePassword)
