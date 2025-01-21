@@ -363,6 +363,18 @@ const lessonSchema = new mongoose.Schema(
       default: false,
       index: true,
     },
+    videoUrl: String,
+    dashUrl: String,
+    rawUrl: String,
+    cloudflareVideoId: String,
+    duration: Number,
+    thumbnail: String,
+    videoMeta: {
+      size: Number,
+      created: String,
+      modified: String,
+      status: String,
+    }
   },
   {
     timestamps: true,

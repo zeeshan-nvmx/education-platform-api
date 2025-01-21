@@ -465,6 +465,83 @@ exports.deleteLesson = async (req, res, next) => {
 }
 
 // Video Management Functions
+// exports.uploadLessonVideo = async (req, res, next) => {
+//   const session = await mongoose.startSession()
+//   session.startTransaction()
+
+//   try {
+//     if (!req.file) {
+//       return next(new AppError('Please provide a video file', 400))
+//     }
+
+//     const lesson = await Lesson.findOne({
+//       _id: req.params.lessonId,
+//       module: req.params.moduleId,
+//       isDeleted: false,
+//     }).session(session)
+
+//     if (!lesson) {
+//       await session.abortTransaction()
+//       return next(new AppError('Lesson not found', 404))
+//     }
+
+//     // Delete existing video if any
+//     if (lesson.cloudflareVideoId) {
+//       await cleanupVideo(lesson.cloudflareVideoId)
+//     }
+
+//     try {
+//       // Get upload URL from Cloudflare
+//       const { uploadUrl, videoId } = await CloudflareService.getUploadUrl()
+
+//       // Upload video to Cloudflare
+//       const formData = new FormData()
+//       formData.append('file', req.file.buffer, {
+//         filename: req.file.originalname,
+//         contentType: req.file.mimetype,
+//       })
+
+//       const uploadResponse = await fetch(uploadUrl, {
+//         method: 'POST',
+//         body: formData,
+//       })
+
+//       if (!uploadResponse.ok) {
+//         throw new Error('Failed to upload video to Cloudflare')
+//       }
+
+//       // Get video details
+//       const videoDetails = await CloudflareService.getVideoDetails(videoId)
+
+//       // Update lesson with video details
+//       lesson.videoUrl = videoDetails.playbackUrl
+//       lesson.cloudflareVideoId = videoId
+//       lesson.duration = Math.round(videoDetails.duration)
+//       await lesson.save({ session })
+
+//       await session.commitTransaction()
+
+//       res.status(200).json({
+//         status: 'success',
+//         data: {
+//           videoUrl: lesson.videoUrl,
+//           duration: lesson.duration,
+//         },
+//       })
+//     } catch (error) {
+//       if (lesson.cloudflareVideoId) {
+//         await cleanupVideo(lesson.cloudflareVideoId)
+//       }
+//       throw error
+//     }
+//   } catch (error) {
+//     await session.abortTransaction()
+//     next(error)
+//   } finally {
+//     session.endSession()
+//   }
+// }
+
 exports.uploadLessonVideo = async (req, res, next) => {
   const session = await mongoose.startSession()
   session.startTransaction()
@@ -472,6 +549,17 @@ exports.uploadLessonVideo = async (req, res, next) => {
   try {
     if (!req.file) {
       return next(new AppError('Please provide a video file', 400))
+    }
+
+    // Check file size (e.g., 200MB limit)
+    const maxSize = 200 * 1024 * 1024 // 200MB in bytes
+    if (req.file.size > maxSize) {
+      return next(new AppError('Video file too large. Maximum size is 200MB', 400))
+    }
+
+    // Check file type
+    if (!req.file.mimetype.startsWith('video/')) {
+      return next(new AppError('Please upload only video files', 400))
     }
 
     const lesson = await Lesson.findOne({
@@ -485,56 +573,55 @@ exports.uploadLessonVideo = async (req, res, next) => {
       return next(new AppError('Lesson not found', 404))
     }
 
-    // Delete existing video if any
+    // If there's an existing video, try to delete it
     if (lesson.cloudflareVideoId) {
-      await cleanupVideo(lesson.cloudflareVideoId)
+      try {
+        await CloudflareService.deleteVideo(lesson.cloudflareVideoId)
+      } catch (error) {
+        // Log the error but continue with the upload
+        console.error('Error deleting existing video:', error)
+      }
     }
 
+    // Upload new video
     try {
-      // Get upload URL from Cloudflare
-      const { uploadUrl, videoId } = await CloudflareService.getUploadUrl()
+      const { videoId, videoDetails } = await CloudflareService.uploadVideo(req.file)
 
-      // Upload video to Cloudflare
-      const formData = new FormData()
-      formData.append('file', req.file.buffer, {
-        filename: req.file.originalname,
-        contentType: req.file.mimetype,
-      })
-
-      const uploadResponse = await fetch(uploadUrl, {
-        method: 'POST',
-        body: formData,
-      })
-
-      if (!uploadResponse.ok) {
-        throw new Error('Failed to upload video to Cloudflare')
+      // Update lesson with all video details
+      lesson.videoUrl = videoDetails.playbackUrl
+      lesson.dashUrl = videoDetails.dashUrl
+      lesson.rawUrl = videoDetails.rawUrl
+      lesson.cloudflareVideoId = videoId
+      lesson.duration = videoDetails.duration || 0
+      lesson.thumbnail = videoDetails.thumbnail
+      lesson.videoMeta = {
+        size: videoDetails.meta.size,
+        created: videoDetails.meta.created,
+        modified: videoDetails.meta.modified,
+        status: videoDetails.meta.status,
       }
 
-      // Get video details
-      const videoDetails = await CloudflareService.getVideoDetails(videoId)
-
-      // Update lesson with video details
-      lesson.videoUrl = videoDetails.playbackUrl
-      lesson.cloudflareVideoId = videoId
-      lesson.duration = Math.round(videoDetails.duration)
       await lesson.save({ session })
-
       await session.commitTransaction()
 
       res.status(200).json({
-        status: 'success',
+        message: 'Video uploaded successfully',
         data: {
           videoUrl: lesson.videoUrl,
+          dashUrl: lesson.dashUrl,
+          rawUrl: lesson.rawUrl,
           duration: lesson.duration,
+          thumbnail: lesson.thumbnail,
+          videoMeta: lesson.videoMeta,
         },
       })
-    } catch (error) {
-      if (lesson.cloudflareVideoId) {
-        await cleanupVideo(lesson.cloudflareVideoId)
-      }
-      throw error
+    } catch (uploadError) {
+      console.error('Error during video upload:', uploadError)
+      await session.abortTransaction()
+      return next(new AppError('Failed to upload video. Please try again.', 500))
     }
   } catch (error) {
+    console.error('Error in uploadLessonVideo:', error)
     await session.abortTransaction()
     next(error)
   } finally {
@@ -563,22 +650,32 @@ exports.deleteLessonVideo = async (req, res, next) => {
       return next(new AppError('No video found for this lesson', 404))
     }
 
-    // Delete video from Cloudflare
-    await cleanupVideo(lesson.cloudflareVideoId)
+    try {
+      await CloudflareService.deleteVideo(lesson.cloudflareVideoId)
+    } catch (error) {
+      // If video doesn't exist in Cloudflare, continue with database cleanup
+      if (!error.message.includes('not found')) {
+        throw error
+      }
+    }
 
-    // Update lesson
+    // Clear all video-related fields
     lesson.videoUrl = undefined
+    lesson.dashUrl = undefined
+    lesson.rawUrl = undefined
     lesson.cloudflareVideoId = undefined
     lesson.duration = undefined
-    await lesson.save({ session })
+    lesson.thumbnail = undefined
+    lesson.videoMeta = undefined
 
+    await lesson.save({ session })
     await session.commitTransaction()
 
     res.status(200).json({
-      status: 'success',
       message: 'Video deleted successfully',
     })
   } catch (error) {
+    console.error('Error in deleteLessonVideo:', error)
     await session.abortTransaction()
     next(error)
   } finally {
