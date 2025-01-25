@@ -112,6 +112,57 @@ exports.createUser = async (req, res, next) => {
   }
 }
 
+// exports.getUsers = async (req, res, next) => {
+//   try {
+//     // Parse and validate pagination parameters
+//     const page = Math.max(parseInt(req.query.page) || 1, 1) // Ensure page is at least 1
+//     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100) // Limit between 1 and 100
+//     const role = req.query.role
+//     const search = req.query.search?.trim()
+
+//     const query = {}
+
+//     // Add role filter if provided and valid
+//     if (role && ['subAdmin', 'moderator', 'user'].includes(role)) {
+//       query.role = role
+//     }
+
+//     // Add search filter if provided
+//     if (search) {
+//       query.$or = [{ email: { $regex: search, $options: 'i' } }, { firstName: { $regex: search, $options: 'i' } }, { lastName: { $regex: search, $options: 'i' } }]
+//     }
+
+//     // Get total count for pagination
+//     const totalUsers = await User.countDocuments(query)
+//     const totalPages = Math.ceil(totalUsers / limit)
+//     const currentPage = Math.min(page, totalPages || 1) // Ensure page doesn't exceed total pages
+
+//     // Fetch users with pagination
+//     const users = await User.find(query)
+//       .select('-password -verificationToken -resetPasswordToken -resetPasswordExpires')
+//       .sort({ createdAt: -1 })
+//       .skip((currentPage - 1) * limit)
+//       .limit(limit)
+
+//     res.status(200).json({
+//       message: 'Users fetched successfully',
+//       data: {
+//         users,
+//         pagination: {
+//           currentPage,
+//           totalPages,
+//           totalUsers,
+//           limit,
+//           hasNextPage: currentPage < totalPages,
+//           hasPrevPage: currentPage > 1,
+//         },
+//       },
+//     })
+//   } catch (error) {
+//     next(error)
+//   }
+// }
+
 exports.getUsers = async (req, res, next) => {
   try {
     // Parse and validate pagination parameters
@@ -119,11 +170,17 @@ exports.getUsers = async (req, res, next) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100) // Limit between 1 and 100
     const role = req.query.role
     const search = req.query.search?.trim()
+    const type = req.query.type 
 
     const query = {}
 
-    // Add role filter if provided and valid
-    if (role && ['subAdmin', 'moderator', 'user'].includes(role)) {
+    // Handle type parameter for filtering non-basic users
+    if (type === 'main') {
+      query.role = { $ne: 'user' } // Exclude basic users
+    } else if (type === 'all') {
+      // Don't add any role filter to get all users
+    } else if (role && ['subAdmin', 'moderator', 'user'].includes(role)) {
+      // If no type is specified, fall back to specific role filter
       query.role = role
     }
 
