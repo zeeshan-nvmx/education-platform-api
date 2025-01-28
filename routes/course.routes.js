@@ -50,33 +50,35 @@ const router = express.Router()
 
 // Public routes
 router.get('/featured', getFeaturedCourses)
+
 router.get('/category/:category', getCoursesByCategory)
+
 router.get('/', getAllCourses)
+
 router.get('/:courseId', validateMongoId, getCourse)
 
-// Protected routes
-router.use(protect)
+// Protected routes - require authentication
+router.get('/:courseId/progress', protect, validateMongoId, getCourseProgress)
 
-// Course progress routes
-router.get('/:courseId/progress', validateMongoId, getCourseProgress)
-router.get('/:courseId/modules/:moduleId/progress', validateMongoId, getModuleProgress)
-router.get('/:courseId/modules/:moduleId/access', validateMongoId, checkModuleAccess)
+router.get('/:courseId/modules/:moduleId/progress', protect, validateMongoId, getModuleProgress)
 
-// Course management routes (admin/subAdmin only)
-router.use(restrictTo('admin', 'subAdmin'))
-router.route('/').post(uploadFields, createCourse)
+router.get('/:courseId/modules/:moduleId/access', protect, validateMongoId, checkModuleAccess)
+
+// Admin/SubAdmin routes
+router.post('/', protect, restrictTo('admin', 'subAdmin'), uploadFields, createCourse)
 
 // Routes requiring course ownership
-router.use('/:courseId', validateMongoId, checkCourseOwnership)
-router.route('/:courseId').put(uploadFields, updateCourse).delete(deleteCourse)
+router.put('/:courseId', protect, restrictTo('admin', 'subAdmin'), validateMongoId, checkCourseOwnership, uploadFields, updateCourse)
 
-// Module routes
+router.delete('/:courseId', protect, restrictTo('admin', 'subAdmin'), validateMongoId, checkCourseOwnership, deleteCourse)
+
+// Module-related routes
 router.get('/:courseId/modules', validateMongoId, getCourseModules)
 
-// Forward module routes to module router
+// Forward module routes
 router.use('/:courseId/modules', moduleRouter)
 
-// Forward lesson routes from course level
+// Forward lesson routes
 router.use('/:courseId/modules/:moduleId/lessons', lessonRouter)
 
 module.exports = router
@@ -89,6 +91,7 @@ module.exports = router
 
 // // Import module router
 // const moduleRouter = require('./module.routes')
+// const lessonRouter = require('./lesson.routes')
 
 // // Configure multer for memory storage
 // const upload = multer({
@@ -123,6 +126,9 @@ module.exports = router
 //   checkModuleAccess,
 //   getCourseProgress,
 //   getModuleProgress,
+//   enrollInCourse,
+//   enrollInModule,
+//   getEnrollmentStatus,
 // } = require('../controllers/course.controller')
 
 // const router = express.Router()
@@ -154,5 +160,8 @@ module.exports = router
 
 // // Forward module routes to module router
 // router.use('/:courseId/modules', moduleRouter)
+
+// // Forward lesson routes from course level
+// router.use('/:courseId/modules/:moduleId/lessons', lessonRouter)
 
 // module.exports = router

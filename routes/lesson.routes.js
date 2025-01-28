@@ -21,28 +21,80 @@ const {
 
 const router = express.Router({ mergeParams: true })
 
-// All routes are protected
-router.use(protect)
+// Routes for enrolled students - require authentication only
+router.get('/', protect, validateMongoId, getLessons)
 
-// Public routes (for enrolled students)
-router.get('/', validateMongoId, getLessons)
-router.get('/:lessonId', validateMongoId, getLesson)
-router.get('/:lessonId/video-url', validateMongoId, getVideoStreamUrl)
-router.get('/:lessonId/quiz', validateMongoId, getLessonQuiz)
-router.get('/:lessonId/progress', validateMongoId, getLessonProgress)
-router.post('/:lessonId/complete', validateMongoId, markLessonComplete)
+router.get('/:lessonId', protect, validateMongoId, getLesson)
+
+router.get('/:lessonId/video-url', protect, validateMongoId, getVideoStreamUrl)
+
+router.get('/:lessonId/quiz', protect, validateMongoId, getLessonQuiz)
+
+router.get('/:lessonId/progress', protect, validateMongoId, getLessonProgress)
+
+router.post('/:lessonId/complete', protect, validateMongoId, markLessonComplete)
 
 // Routes requiring course/module ownership
-router.use(checkCourseOwnership)
+router.post('/', protect, checkCourseOwnership, createLesson)
 
-// Lesson management routes
-router.post('/', createLesson)
-router.post('/reorder', reorderLessons)
-router.put('/:lessonId', validateMongoId, updateLesson)
-router.delete('/:lessonId', validateMongoId, deleteLesson)
+router.post('/reorder', protect, checkCourseOwnership, reorderLessons)
+
+router.put('/:lessonId', protect, checkCourseOwnership, validateMongoId, updateLesson)
+
+router.delete('/:lessonId', protect, checkCourseOwnership, validateMongoId, deleteLesson)
 
 // Video management routes
-router.post('/:lessonId/video', validateMongoId, uploadVideo.single('video'), uploadLessonVideo)
-router.delete('/:lessonId/video', validateMongoId, deleteLessonVideo)
+router.post('/:lessonId/video', protect, checkCourseOwnership, validateMongoId, uploadVideo.single('video'), uploadLessonVideo)
+
+router.delete('/:lessonId/video', protect, checkCourseOwnership, validateMongoId, deleteLessonVideo)
 
 module.exports = router
+
+// const express = require('express')
+// const { protect, restrictTo } = require('../middleware/auth')
+// const { checkCourseOwnership } = require('../middleware/checkOwnership')
+// const validateMongoId = require('../middleware/validateMongoId')
+// const { uploadVideo } = require('../middleware/upload')
+
+// const {
+//   createLesson,
+//   getLessons,
+//   getLesson,
+//   updateLesson,
+//   deleteLesson,
+//   uploadLessonVideo,
+//   deleteLessonVideo,
+//   markLessonComplete,
+//   getLessonProgress,
+//   reorderLessons,
+//   getLessonQuiz,
+//   getVideoStreamUrl,
+// } = require('../controllers/lesson.controller')
+
+// const router = express.Router({ mergeParams: true })
+
+// // All routes are protected
+// router.use(protect)
+
+// // Public routes (for enrolled students)
+// router.get('/', validateMongoId, getLessons)
+// router.get('/:lessonId', validateMongoId, getLesson)
+// router.get('/:lessonId/video-url', validateMongoId, getVideoStreamUrl)
+// router.get('/:lessonId/quiz', validateMongoId, getLessonQuiz)
+// router.get('/:lessonId/progress', validateMongoId, getLessonProgress)
+// router.post('/:lessonId/complete', validateMongoId, markLessonComplete)
+
+// // Routes requiring course/module ownership
+// router.use(checkCourseOwnership)
+
+// // Lesson management routes
+// router.post('/', createLesson)
+// router.post('/reorder', reorderLessons)
+// router.put('/:lessonId', validateMongoId, updateLesson)
+// router.delete('/:lessonId', validateMongoId, deleteLesson)
+
+// // Video management routes
+// router.post('/:lessonId/video', validateMongoId, uploadVideo.single('video'), uploadLessonVideo)
+// router.delete('/:lessonId/video', validateMongoId, deleteLessonVideo)
+
+// module.exports = router
