@@ -23,30 +23,21 @@ const router = express.Router({ mergeParams: true })
 
 // Routes for enrolled students - require authentication only
 router.get('/', protect, validateMongoId, getLessons)
-
 router.get('/:lessonId', protect, validateMongoId, getLesson)
-
 router.get('/:lessonId/video-url', protect, validateMongoId, getVideoStreamUrl)
-
 router.get('/:lessonId/quiz', protect, validateMongoId, getLessonQuiz)
-
 router.get('/:lessonId/progress', protect, validateMongoId, getLessonProgress)
-
 router.post('/:lessonId/complete', protect, validateMongoId, markLessonComplete)
 
-// Routes requiring course/module ownership
-router.post('/', protect, checkCourseOwnership, createLesson)
-
-router.post('/reorder', protect, checkCourseOwnership, reorderLessons)
-
-router.put('/:lessonId', protect, checkCourseOwnership, validateMongoId, updateLesson)
-
-router.delete('/:lessonId', protect, checkCourseOwnership, validateMongoId, deleteLesson)
+// Routes requiring admin or subAdmin rights
+router.post('/', protect, restrictTo('admin', 'subAdmin'), createLesson)
+router.post('/reorder', protect, restrictTo('admin', 'subAdmin'), reorderLessons)
+router.put('/:lessonId', protect, restrictTo('admin', 'subAdmin'), validateMongoId, updateLesson)
+router.delete('/:lessonId', protect, restrictTo('admin', 'subAdmin'), validateMongoId, deleteLesson)
 
 // Video management routes
-router.post('/:lessonId/video', protect, checkCourseOwnership, validateMongoId, uploadVideo.single('video'), uploadLessonVideo)
-
-router.delete('/:lessonId/video', protect, checkCourseOwnership, validateMongoId, deleteLessonVideo)
+router.post('/:lessonId/video', protect, restrictTo('admin', 'subAdmin'), validateMongoId, uploadVideo.single('video'), uploadLessonVideo)
+router.delete('/:lessonId/video', protect, restrictTo('admin', 'subAdmin'), validateMongoId, deleteLessonVideo)
 
 module.exports = router
 

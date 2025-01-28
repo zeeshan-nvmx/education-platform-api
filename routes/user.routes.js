@@ -4,14 +4,13 @@ const { getProfile, updateProfile, getEnrolledCourses, getCourseProgress } = req
 
 const router = express.Router()
 
-// Protect all routes after this middleware
-router.use(protect)
-router.use(isEmailVerified)
+// Profile management routes
+router.get('/profile', protect, /*isEmailVerified,*/ getProfile)
+router.put('/profile', protect, /*isEmailVerified,*/ updateProfile)
 
-router.get('/profile', getProfile)
-router.put('/profile', updateProfile)
-router.get('/enrolled-courses', getEnrolledCourses)
-router.get('/course-progress/:courseId', getCourseProgress)
+// Enrollment and progress tracking routes
+router.get('/enrolled-courses', protect, /*isEmailVerified,*/ getEnrolledCourses)
+router.get('/course-progress/:courseId', protect, /*isEmailVerified,*/ getCourseProgress)
 
 module.exports = router
 

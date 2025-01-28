@@ -26,15 +26,15 @@ const router = express.Router()
 const { createUser, getUsers, deleteUser, updateUserRole } = adminController
 
 // User creation
-router.post('/users', protect, restrictTo('admin'), createUser)
+router.post('/users', protect, restrictTo('admin', 'subAdmin'), createUser)
 
 // Get all users
-router.get('/users', protect, restrictTo('admin'), getUsers)
+router.get('/users', protect, restrictTo('admin', 'subAdmin'), getUsers)
 
 // Delete specific user
-router.delete('/users/:userId', protect, restrictTo('admin'), deleteUser)
+router.delete('/users/:userId', protect, restrictTo('admin', 'subAdmin'), deleteUser)
 
 // Update user role
-router.patch('/users/:userId', protect, restrictTo('admin'), updateUserRole)
+router.patch('/users/:userId', protect, restrictTo('admin', 'subAdmin'), updateUserRole)
 
 module.exports = router

@@ -22,24 +22,21 @@ const router = express.Router({ mergeParams: true })
 
 // Routes for enrolled students - require authentication only
 router.get('/', protect, validateMongoId, getModules)
-
 router.get('/:moduleId', protect, validateMongoId, getModule)
-
 router.get('/:moduleId/lessons', protect, validateMongoId, getModuleLessons)
-
 router.get('/:moduleId/enrollment-status', protect, validateMongoId, getModuleEnrollmentStatus)
 
-// Routes requiring course ownership or admin rights
-router.post('/', protect, checkCourseOwnership, createModule)
+// Routes requiring admin rights
+router.post('/', protect, restrictTo('admin', 'subAdmin'), /* checkCourseOwnership, */ createModule)
 
-router.put('/:moduleId', protect, checkCourseOwnership, validateMongoId, updateModule)
+router.put('/:moduleId', protect, restrictTo('admin', 'subAdmin'), /* checkCourseOwnership, */ validateMongoId, updateModule)
 
-router.delete('/:moduleId', protect, checkCourseOwnership, validateMongoId, deleteModule)
+router.delete('/:moduleId', protect, restrictTo('admin', 'subAdmin'), /* checkCourseOwnership, */ validateMongoId, deleteModule)
 
 // Module order and prerequisites management
-router.put('/reorder', protect, checkCourseOwnership, reorderModules)
+router.put('/reorder', protect, restrictTo('admin', 'subAdmin'), /* checkCourseOwnership, */ reorderModules)
 
-router.put('/:moduleId/prerequisites', protect, checkCourseOwnership, validateMongoId, updateModulePrerequisites)
+router.put('/:moduleId/prerequisites', protect, restrictTo('admin', 'subAdmin'), /* checkCourseOwnership, */ validateMongoId, updateModulePrerequisites)
 
 // Forward lesson routes
 router.use('/:moduleId/lessons', lessonRouter)
