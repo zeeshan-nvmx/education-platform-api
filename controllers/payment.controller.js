@@ -6,20 +6,39 @@ const { AppError } = require('../utils/errors')
 const { initiatePayment, validatePayment } = require('../utils/sslcommerz')
 const crypto = require('crypto')
 
-// Validation Schemas
+// validation schemas 
 const initiatePaymentSchema = Joi.object({
-  discountCode: Joi.string().trim(),
   redirectUrl: Joi.string().uri().required(),
+  discountCode: Joi.string().trim(),
+  shippingAddress: Joi.object({
+    address: Joi.string().required(),
+    city: Joi.string().required(),
+    country: Joi.string().required(),
+    phone: Joi.string().required()
+  }).required()
 }).options({ abortEarly: false })
 
 const initiateModulePaymentSchema = Joi.object({
-  moduleIds: Joi.array()
-    .items(Joi.string().regex(/^[0-9a-fA-F]{24}$/))
-    .min(1)
-    .required(),
-  discountCode: Joi.string().trim(),
+  moduleIds: Joi.array().items(
+    Joi.string().regex(/^[0-9a-fA-F]{24}$/)
+  ).min(1).required(),
   redirectUrl: Joi.string().uri().required(),
+  discountCode: Joi.string().trim(),
+  shippingAddress: Joi.object({
+    address: Joi.string().required(),
+    city: Joi.string().required(),
+    country: Joi.string().required(),
+    phone: Joi.string().required()
+  }).required()
 }).options({ abortEarly: false })
+
+// Schema for SSLCommerz redirect verification
+const verifyPaymentSchema = Joi.object({
+  tran_id: Joi.string().required(),
+  val_id: Joi.string().required(),
+  status: Joi.string().required()
+}).options({ abortEarly: false })
+
 
 const refundSchema = Joi.object({
   reason: Joi.string().required(),
@@ -137,7 +156,6 @@ async function processEnrollment(userId, courseId, purchaseType, moduleIds = [],
   return user
 }
 
-// Course Payment Initiation
 exports.initiateCoursePayment = async (req, res, next) => {
   const session = await mongoose.startSession()
   session.startTransaction()
@@ -147,16 +165,16 @@ exports.initiateCoursePayment = async (req, res, next) => {
     if (error) {
       return res.status(400).json({
         status: 'error',
-        errors: error.details.map(detail => ({
+        errors: error.details.map((detail) => ({
           field: detail.context.key,
-          message: detail.message
-        }))
+          message: detail.message,
+        })),
       })
     }
 
     const course = await Course.findOne({
       _id: req.params.courseId,
-      isDeleted: false
+      isDeleted: false,
     }).session(session)
 
     if (!course) {
@@ -164,72 +182,85 @@ exports.initiateCoursePayment = async (req, res, next) => {
       return next(new AppError('Course not found', 404))
     }
 
-    // Enhanced access verification
-    const canPurchase = await verifyAccess(req.user._id, course._id)
-    if (!canPurchase) {
+    // Check if user already has access
+    const hasAccess = !(await verifyAccess(req.user._id, course._id))
+    if (hasAccess) {
       await session.abortTransaction()
       return next(new AppError('You already have access to this course', 400))
     }
 
     // Calculate discounted amount if discount code provided
-    const { discountedAmount, discount } = await calculateDiscountedAmount(
-      course.price,
-      value.discountCode,
-      course._id
-    )
+    const { discountedAmount, discount } = await calculateDiscountedAmount(course.price, value.discountCode, course._id)
 
     // Generate unique transaction ID
     const transactionId = crypto.randomBytes(16).toString('hex')
 
-    // Create payment record with additional tracking
-    const payment = await Payment.create([{
-      user: req.user._id,
-      course: course._id,
-      purchaseType: 'course',
-      amount: course.price,
-      discount,
-      discountedAmount,
-      transactionId,
-      status: 'pending',
-      createdAt: new Date(),
-      meta: {
-        courseTitle: course.title,
-        userEmail: req.user.email
-      }
-    }], { session })
-
-    // Prepare SSLCommerz data with improved customer info
+    // Prepare SSLCommerz required data
     const sslData = {
+      store_id: process.env.SSLCOMMERZ_STORE_ID,
+      store_passwd: process.env.SSLCOMMERZ_STORE_PASSWORD,
       total_amount: discountedAmount,
       currency: 'BDT',
       tran_id: transactionId,
-      success_url: `${value.redirectUrl}?status=success&tran_id=${transactionId}`,
-      fail_url: `${value.redirectUrl}?status=fail&tran_id=${transactionId}`,
-      cancel_url: `${value.redirectUrl}?status=cancel&tran_id=${transactionId}`,
-      ipn_url: `${process.env.API_URL}/api/payments/ipn`,
-      shipping_method: 'NO',
+      success_url: `${value.redirectUrl}?status=success`,
+      fail_url: `${value.redirectUrl}?status=fail`,
+      cancel_url: `${value.redirectUrl}?status=cancel`,
+      ipn_url: `${process.env.API_URL}/api/v1/payments/ipn`,
       product_name: course.title,
       product_category: 'Course',
-      product_profile: 'general',
+      product_profile: 'non-physical-goods',
       cus_name: `${req.user.firstName} ${req.user.lastName}`,
       cus_email: req.user.email,
-      cus_add1: 'Customer Address',
-      cus_city: 'Customer City',
-      cus_country: 'Bangladesh',
-      value_a: course._id.toString(), // Additional reference data
-      value_b: 'course',
-      value_c: req.user._id.toString()
+      cus_add1: value.shippingAddress.address,
+      cus_city: value.shippingAddress.city,
+      cus_country: value.shippingAddress.country,
+      cus_phone: value.shippingAddress.phone,
+      shipping_method: 'NO',
+      num_of_item: 1,
+      emi_option: 0,
+      value_a: course._id.toString(), // Course ID
+      value_b: 'course', // Purchase type
+      value_c: req.user._id.toString(), // User ID
     }
+
+    // Create payment record
+    const payment = await Payment.create(
+      [
+        {
+          user: req.user._id,
+          course: course._id,
+          purchaseType: 'course',
+          amount: course.price,
+          discount,
+          discountedAmount,
+          transactionId,
+          customerDetails: {
+            name: `${req.user.firstName} ${req.user.lastName}`,
+            email: req.user.email,
+            ...value.shippingAddress,
+          },
+          status: 'pending',
+          createdAt: new Date(),
+        },
+      ],
+      { session }
+    )
 
     // Initiate SSLCommerz payment
     const sslResponse = await initiatePayment(sslData)
 
+    // Validate SSLCommerz response
+    if (!sslResponse?.GatewayPageURL || !sslResponse?.sessionkey) {
+      await session.abortTransaction()
+      return next(new AppError('Failed to initialize payment gateway', 500))
+    }
+
     // Update payment record with SSLCommerz session
     await Payment.findByIdAndUpdate(
       payment[0]._id,
-      { 
+      {
         sslcommerzSessionKey: sslResponse.sessionkey,
-        gatewayData: sslResponse // Store complete gateway response
+        gatewayPageURL: sslResponse.GatewayPageURL,
       },
       { session }
     )
@@ -239,11 +270,10 @@ exports.initiateCoursePayment = async (req, res, next) => {
     res.status(200).json({
       status: 'success',
       data: {
-        gatewayRedirectUrl: sslResponse.GatewayPageURL,
         transactionId,
         amount: discountedAmount,
-        courseId: course._id
-      }
+        gatewayRedirectURL: sslResponse.GatewayPageURL,
+      },
     })
   } catch (error) {
     await session.abortTransaction()
@@ -253,7 +283,6 @@ exports.initiateCoursePayment = async (req, res, next) => {
   }
 }
 
-// Module Payment Initiation
 exports.initiateModulePayment = async (req, res, next) => {
   const session = await mongoose.startSession()
   session.startTransaction()
@@ -263,26 +292,26 @@ exports.initiateModulePayment = async (req, res, next) => {
     if (error) {
       return res.status(400).json({
         status: 'error',
-        errors: error.details.map(detail => ({
+        errors: error.details.map((detail) => ({
           field: detail.context.key,
-          message: detail.message
-        }))
+          message: detail.message,
+        })),
       })
     }
 
     const { moduleIds } = value
 
-    // Find course and validate modules in parallel
+    // Find course and validate modules
     const [course, modules] = await Promise.all([
       Course.findOne({
         _id: req.params.courseId,
-        isDeleted: false
+        isDeleted: false,
       }).session(session),
       Module.find({
         _id: { $in: moduleIds },
         course: req.params.courseId,
-        isDeleted: false
-      }).session(session)
+        isDeleted: false,
+      }).session(session),
     ])
 
     if (!course) {
@@ -295,9 +324,9 @@ exports.initiateModulePayment = async (req, res, next) => {
       return next(new AppError('One or more modules not found', 404))
     }
 
-    // Enhanced access verification
-    const canPurchase = await verifyAccess(req.user._id, course._id, moduleIds)
-    if (!canPurchase) {
+    // Check if user already has access
+    const hasAccess = !(await verifyAccess(req.user._id, course._id, moduleIds))
+    if (hasAccess) {
       await session.abortTransaction()
       return next(new AppError('You already have access to one or more of these modules', 400))
     }
@@ -306,71 +335,79 @@ exports.initiateModulePayment = async (req, res, next) => {
     const totalAmount = course.modulePrice * modules.length
 
     // Calculate discounted amount if discount code provided
-    const { discountedAmount, discount } = await calculateDiscountedAmount(
-      totalAmount,
-      value.discountCode,
-      course._id
-    )
+    const { discountedAmount, discount } = await calculateDiscountedAmount(totalAmount, value.discountCode, course._id)
 
     // Generate unique transaction ID
     const transactionId = crypto.randomBytes(16).toString('hex')
 
-    // Create payment record with additional tracking
-    const payment = await Payment.create([{
-      user: req.user._id,
-      course: course._id,
-      purchaseType: 'module',
-      modules: moduleIds,
-      amount: totalAmount,
-      discount,
-      discountedAmount,
-      transactionId,
-      status: 'pending',
-      createdAt: new Date(),
-      meta: {
-        courseTitle: course.title,
-        moduleCount: modules.length,
-        userEmail: req.user.email,
-        moduleDetails: modules.map(m => ({
-          id: m._id,
-          title: m.title
-        }))
-      }
-    }], { session })
-
-    // Prepare SSLCommerz data with improved details
+    // Prepare SSLCommerz required data
     const sslData = {
+      store_id: process.env.SSLCOMMERZ_STORE_ID,
+      store_passwd: process.env.SSLCOMMERZ_STORE_PASSWORD,
       total_amount: discountedAmount,
       currency: 'BDT',
       tran_id: transactionId,
-      success_url: `${value.redirectUrl}?status=success&tran_id=${transactionId}`,
-      fail_url: `${value.redirectUrl}?status=fail&tran_id=${transactionId}`,
-      cancel_url: `${value.redirectUrl}?status=cancel&tran_id=${transactionId}`,
-      ipn_url: `${process.env.API_URL}/api/payments/ipn`,
-      shipping_method: 'NO',
+      success_url: `${value.redirectUrl}?status=success`,
+      fail_url: `${value.redirectUrl}?status=fail`,
+      cancel_url: `${value.redirectUrl}?status=cancel`,
+      ipn_url: `${process.env.API_URL}/api/v1/payments/ipn`,
       product_name: `${course.title} - ${modules.length} Modules`,
       product_category: 'Course Modules',
-      product_profile: 'general',
+      product_profile: 'non-physical-goods',
       cus_name: `${req.user.firstName} ${req.user.lastName}`,
       cus_email: req.user.email,
-      cus_add1: 'Customer Address',
-      cus_city: 'Customer City',
-      cus_country: 'Bangladesh',
-      value_a: course._id.toString(),
-      value_b: 'module',
-      value_c: req.user._id.toString(),
-      value_d: moduleIds.join(',')
+      cus_add1: value.shippingAddress.address,
+      cus_city: value.shippingAddress.city,
+      cus_country: value.shippingAddress.country,
+      cus_phone: value.shippingAddress.phone,
+      shipping_method: 'NO',
+      num_of_item: modules.length,
+      emi_option: 0,
+      value_a: course._id.toString(), // Course ID
+      value_b: 'module', // Purchase type
+      value_c: req.user._id.toString(), // User ID
+      value_d: moduleIds.join(','), // Module IDs
     }
+
+    // Create payment record
+    const payment = await Payment.create(
+      [
+        {
+          user: req.user._id,
+          course: course._id,
+          purchaseType: 'module',
+          modules: moduleIds,
+          amount: totalAmount,
+          discount,
+          discountedAmount,
+          transactionId,
+          customerDetails: {
+            name: `${req.user.firstName} ${req.user.lastName}`,
+            email: req.user.email,
+            ...value.shippingAddress,
+          },
+          status: 'pending',
+          createdAt: new Date(),
+        },
+      ],
+      { session }
+    )
 
     // Initiate SSLCommerz payment
     const sslResponse = await initiatePayment(sslData)
 
+    // Validate SSLCommerz response
+    if (!sslResponse?.GatewayPageURL || !sslResponse?.sessionkey) {
+      await session.abortTransaction()
+      return next(new AppError('Failed to initialize payment gateway', 500))
+    }
+
     // Update payment record with SSLCommerz session
     await Payment.findByIdAndUpdate(
       payment[0]._id,
-      { 
+      {
         sslcommerzSessionKey: sslResponse.sessionkey,
-        gatewayData: sslResponse
+        gatewayPageURL: sslResponse.GatewayPageURL,
       },
       { session }
     )
@@ -380,12 +417,10 @@ exports.initiateModulePayment = async (req, res, next) => {
     res.status(200).json({
       status: 'success',
       data: {
-        gatewayRedirectUrl: sslResponse.GatewayPageURL,
         transactionId,
         amount: discountedAmount,
-        courseId: course._id,
-        moduleIds
-      }
+        gatewayRedirectURL: sslResponse.GatewayPageURL,
+      },
     })
   } catch (error) {
     await session.abortTransaction()
@@ -395,17 +430,28 @@ exports.initiateModulePayment = async (req, res, next) => {
   }
 }
 
-// Payment Verification
 exports.verifyPayment = async (req, res, next) => {
   const session = await mongoose.startSession()
   session.startTransaction()
 
   try {
-    const { tran_id, status } = req.body
+    // These parameters come from SSLCommerz redirect
+    const { error, value } = verifyPaymentSchema.validate(req.query)
+    if (error) {
+      return res.status(400).json({
+        status: 'error',
+        errors: error.details.map((detail) => ({
+          field: detail.context.key,
+          message: detail.message,
+        })),
+      })
+    }
+
+    const { tran_id, val_id, status } = value
 
     const payment = await Payment.findOne({
       transactionId: tran_id,
-      status: 'pending'
+      status: 'pending',
     }).session(session)
 
     if (!payment) {
@@ -413,11 +459,11 @@ exports.verifyPayment = async (req, res, next) => {
       return next(new AppError('Invalid transaction', 400))
     }
 
-    // Handle failed payment
     if (status !== 'VALID') {
       payment.status = 'failed'
-      payment.validationResponse = req.body
+      payment.validationResponse = req.query
       await payment.save({ session })
+
       await session.commitTransaction()
 
       return res.status(200).json({
@@ -425,18 +471,19 @@ exports.verifyPayment = async (req, res, next) => {
         data: {
           verified: false,
           message: 'Payment validation failed',
-          transactionId: tran_id
-        }
+          transactionId: tran_id,
+        },
       })
     }
 
-    // Validate payment with SSLCommerz
-    const validationResponse = await validatePayment({ val_id: req.body.val_id })
+    // Verify with SSLCommerz
+    const validationResponse = await validatePayment({ val_id })
     payment.validationResponse = validationResponse
 
     if (validationResponse.status !== 'VALID') {
       payment.status = 'failed'
       await payment.save({ session })
+
       await session.commitTransaction()
 
       return res.status(200).json({
@@ -444,19 +491,13 @@ exports.verifyPayment = async (req, res, next) => {
         data: {
           verified: false,
           message: 'Gateway validation failed',
-          transactionId: tran_id
-        }
+          transactionId: tran_id,
+        },
       })
     }
 
-    // Process enrollment using helper function
-    await processEnrollment(
-      payment.user,
-      payment.course,
-      payment.purchaseType,
-      payment.modules || [],
-      session
-    )
+    // Process enrollment if payment is valid
+    await processEnrollment(payment.user, payment.course, payment.purchaseType, payment.modules || [], session)
 
     // Update payment status
     payment.status = 'completed'
@@ -466,24 +507,16 @@ exports.verifyPayment = async (req, res, next) => {
     // Update course total students if needed
     const existingEnrollment = await User.findOne({
       _id: payment.user,
-      'enrolledCourses.course': payment.course
+      'enrolledCourses.course': payment.course,
     }).session(session)
 
     if (!existingEnrollment) {
-      await Course.updateOne(
-        { _id: payment.course },
-        { $inc: { totalStudents: 1 } },
-        { session }
-      )
+      await Course.updateOne({ _id: payment.course }, { $inc: { totalStudents: 1 } }, { session })
     }
 
     // Update discount usage if applicable
     if (payment.discount) {
-      await Discount.updateOne(
-        { _id: payment.discount },
-        { $inc: { usedCount: 1 } },
-        { session }
-      )
+      await Discount.updateOne({ _id: payment.discount }, { $inc: { usedCount: 1 } }, { session })
     }
 
     await session.commitTransaction()
@@ -492,13 +525,13 @@ exports.verifyPayment = async (req, res, next) => {
       status: 'success',
       data: {
         verified: true,
-        enrollment: {
-          type: payment.purchaseType,
-          courseId: payment.course,
-          moduleIds: payment.modules,
-          amount: payment.discountedAmount || payment.amount
-        }
-      }
+        transactionId: tran_id,
+        amount: payment.discountedAmount || payment.amount,
+        purchaseType: payment.purchaseType,
+        courseId: payment.course,
+        moduleIds: payment.modules,
+        completedAt: payment.completedAt,
+      },
     })
   } catch (error) {
     await session.abortTransaction()
@@ -508,7 +541,6 @@ exports.verifyPayment = async (req, res, next) => {
   }
 }
 
-// IPN Handler
 exports.handleIPN = async (req, res) => {
   const session = await mongoose.startSession()
   session.startTransaction()
@@ -516,52 +548,39 @@ exports.handleIPN = async (req, res) => {
   try {
     const payment = await Payment.findOne({
       transactionId: req.body.tran_id,
-      status: 'pending'
+      status: 'pending',
     }).session(session)
 
     if (payment) {
       payment.ipnResponse = req.body
       payment.lastIpnReceived = new Date()
-      
-      // Update payment status based on IPN if needed
+
       if (req.body.status === 'VALID' && !payment.validationResponse) {
-        const validationResponse = await validatePayment({ val_id: req.body.val_id })
-        
+        const validationResponse = await validatePayment({
+          val_id: req.body.val_id,
+        })
+
         if (validationResponse.status === 'VALID') {
           payment.status = 'completed'
           payment.validationResponse = validationResponse
           payment.completedAt = new Date()
 
           // Process enrollment
-          await processEnrollment(
-            payment.user,
-            payment.course,
-            payment.purchaseType,
-            payment.modules || [],
-            session
-          )
+          await processEnrollment(payment.user, payment.course, payment.purchaseType, payment.modules || [], session)
 
-          // Update course total students if needed
+          // Update course total students
           const existingEnrollment = await User.findOne({
             _id: payment.user,
-            'enrolledCourses.course': payment.course
+            'enrolledCourses.course': payment.course,
           }).session(session)
 
           if (!existingEnrollment) {
-            await Course.updateOne(
-              { _id: payment.course },
-              { $inc: { totalStudents: 1 } },
-              { session }
-            )
+            await Course.updateOne({ _id: payment.course }, { $inc: { totalStudents: 1 } }, { session })
           }
 
           // Update discount usage
           if (payment.discount) {
-            await Discount.updateOne(
-              { _id: payment.discount },
-              { $inc: { usedCount: 1 } },
-              { session }
-            )
+            await Discount.updateOne({ _id: payment.discount }, { $inc: { usedCount: 1 } }, { session })
           }
         }
       }
@@ -580,114 +599,6 @@ exports.handleIPN = async (req, res) => {
   }
 }
 
-// Request Refund
-exports.requestRefund = async (req, res, next) => {
-  const session = await mongoose.startSession()
-  session.startTransaction()
-
-  try {
-    const { error, value } = refundSchema.validate(req.body)
-    if (error) {
-      return res.status(400).json({
-        status: 'error',
-        errors: error.details.map(detail => ({
-          field: detail.context.key,
-          message: detail.message
-        }))
-      })
-    }
-
-    const payment = await Payment.findOne({
-      _id: req.params.paymentId,
-      user: req.user._id,
-      status: 'completed'
-    }).session(session)
-
-    if (!payment) {
-      await session.abortTransaction()
-      return next(new AppError('Payment not found or not eligible for refund', 404))
-    }
-
-    // Check refund eligibility
-    const refundTimeLimit = 30 * 24 * 60 * 60 * 1000 // 30 days
-    if (Date.now() - payment.createdAt > refundTimeLimit) {
-      await session.abortTransaction()
-      return next(new AppError('Refund time limit exceeded', 400))
-    }
-
-    // Update payment record
-    payment.status = 'refunded'
-    payment.refundReason = value.reason
-    payment.refundedAt = new Date()
-    await payment.save({ session })
-
-    // Handle course/module access removal
-    const user = await User.findById(req.user._id).session(session)
-    const enrollmentIndex = user.enrolledCourses.findIndex(
-      ec => ec.course.toString() === payment.course.toString()
-    )
-
-    if (enrollmentIndex !== -1) {
-      if (payment.purchaseType === 'course') {
-        // Remove entire course enrollment
-        user.enrolledCourses.splice(enrollmentIndex, 1)
-
-        // Decrement course total students
-        await Course.updateOne(
-          { _id: payment.course },
-          { $inc: { totalStudents: -1 } },
-          { session }
-        )
-      } else {
-        // Remove specific modules
-        const enrollment = user.enrolledCourses[enrollmentIndex]
-        enrollment.enrolledModules = enrollment.enrolledModules.filter(
-          em => !payment.modules.includes(em.module.toString())
-        )
-
-        // If no modules left, remove the course enrollment
-        if (enrollment.enrolledModules.length === 0) {
-          user.enrolledCourses.splice(enrollmentIndex, 1)
-          await Course.updateOne(
-            { _id: payment.course },
-            { $inc: { totalStudents: -1 } },
-            { session }
-          )
-        }
-      }
-      
-      await user.save({ session })
-    }
-
-    // Revert discount usage if applicable
-    if (payment.discount) {
-      await Discount.updateOne(
-        { _id: payment.discount },
-        { $inc: { usedCount: -1 } },
-        { session }
-      )
-    }
-
-    await session.commitTransaction()
-
-    res.status(200).json({
-      status: 'success',
-      message: 'Refund processed successfully',
-      data: {
-        refundId: payment._id,
-        amount: payment.amount,
-        refundedAt: payment.refundedAt
-      }
-    })
-  } catch (error) {
-    await session.abortTransaction()
-    next(error)
-  } finally {
-    session.endSession()
-  }
-}
-
-// Get Payment History
 exports.getPaymentHistory = async (req, res, next) => {
   try {
     const page = Math.max(parseInt(req.query.page) || 1, 1)
@@ -696,22 +607,18 @@ exports.getPaymentHistory = async (req, res, next) => {
     const startDate = req.query.startDate ? new Date(req.query.startDate) : null
     const endDate = req.query.endDate ? new Date(req.query.endDate) : null
 
-    // Build query
     const query = { user: req.user._id }
-    
-    // Add status filter if valid
+
     if (status && ['pending', 'completed', 'failed', 'refunded'].includes(status)) {
       query.status = status
     }
 
-    // Add date range filter if provided
     if (startDate || endDate) {
       query.createdAt = {}
       if (startDate) query.createdAt.$gte = startDate
       if (endDate) query.createdAt.$lte = endDate
     }
 
-    // Get total count and paginated results
     const [totalPayments, payments] = await Promise.all([
       Payment.countDocuments(query),
       Payment.find(query)
@@ -720,39 +627,36 @@ exports.getPaymentHistory = async (req, res, next) => {
           {
             path: 'course',
             select: 'title thumbnail price modulePrice',
-            match: { isDeleted: false }
+            match: { isDeleted: false },
           },
           {
             path: 'modules',
             select: 'title order',
-            match: { isDeleted: false }
+            match: { isDeleted: false },
           },
           {
             path: 'discount',
-            select: 'code type value'
-          }
+            select: 'code type value',
+          },
         ])
         .sort('-createdAt')
         .skip((page - 1) * limit)
-        .limit(limit)
+        .limit(limit),
     ])
 
     const totalPages = Math.ceil(totalPayments / limit)
 
-    // Process payment data for response
-    const processedPayments = payments.map(payment => {
+    const processedPayments = payments.map((payment) => {
       const paymentObj = payment.toObject()
-
-      // Add additional calculated fields
-      paymentObj.savingsAmount = payment.amount - (payment.discountedAmount || payment.amount)
-      paymentObj.paymentDate = payment.createdAt
-      
-      // Add module count for module purchases
-      if (payment.purchaseType === 'module' && payment.modules) {
-        paymentObj.moduleCount = payment.modules.length
+      return {
+        ...paymentObj,
+        customerDetails: payment.customerDetails,
+        savedAmount: payment.amount - (payment.discountedAmount || payment.amount),
+        paymentDate: payment.createdAt,
+        completedDate: payment.completedAt,
+        gatewayPageURL: payment.gatewayPageURL,
+        moduleCount: payment.modules?.length || 0,
       }
-
-      return paymentObj
     })
 
     res.status(200).json({
@@ -765,22 +669,103 @@ exports.getPaymentHistory = async (req, res, next) => {
           totalPayments,
           hasNextPage: page < totalPages,
           hasPrevPage: page > 1,
-          limit
         },
         summary: {
-          totalSpent: processedPayments.reduce((sum, p) => 
-            sum + (p.discountedAmount || p.amount), 0
-          ),
-          totalSaved: processedPayments.reduce((sum, p) => 
-            sum + (p.savingsAmount || 0), 0
-          )
-        }
-      }
+          totalSpent: processedPayments.reduce((sum, p) => (p.status === 'completed' ? sum + (p.discountedAmount || p.amount) : sum), 0),
+          totalSaved: processedPayments.reduce((sum, p) => (p.status === 'completed' ? sum + p.savedAmount : sum), 0),
+        },
+      },
     })
   } catch (error) {
     next(error)
   }
 }
+
+exports.requestRefund = async (req, res, next) => {
+  const session = await mongoose.startSession()
+  session.startTransaction()
+
+  try {
+    const { error, value } = refundSchema.validate(req.body)
+    if (error) {
+      return res.status(400).json({
+        status: 'error',
+        errors: error.details.map((detail) => ({
+          field: detail.context.key,
+          message: detail.message,
+        })),
+      })
+    }
+
+    const payment = await Payment.findOne({
+      _id: req.params.paymentId,
+      user: req.user._id,
+      status: 'completed',
+    }).session(session)
+
+    if (!payment) {
+      await session.abortTransaction()
+      return next(new AppError('Payment not found or not eligible for refund', 404))
+    }
+
+    const refundTimeLimit = 30 * 24 * 60 * 60 * 1000 // 30 days
+    if (Date.now() - payment.createdAt > refundTimeLimit) {
+      await session.abortTransaction()
+      return next(new AppError('Refund time limit exceeded', 400))
+    }
+
+    payment.status = 'refunded'
+    payment.refundReason = value.reason
+    payment.refundedAt = new Date()
+    await payment.save({ session })
+
+    // Handle access removal
+    const user = await User.findById(req.user._id).session(session)
+    const enrollmentIndex = user.enrolledCourses.findIndex((ec) => ec.course.toString() === payment.course.toString())
+
+    if (enrollmentIndex !== -1) {
+      if (payment.purchaseType === 'course') {
+        // Remove entire course enrollment
+        user.enrolledCourses.splice(enrollmentIndex, 1)
+
+        await Course.updateOne({ _id: payment.course }, { $inc: { totalStudents: -1 } }, { session })
+      } else {
+        // Remove specific modules
+        const enrollment = user.enrolledCourses[enrollmentIndex]
+        enrollment.enrolledModules = enrollment.enrolledModules.filter((em) => !payment.modules.includes(em.module.toString()))
+
+        if (enrollment.enrolledModules.length === 0) {
+          user.enrolledCourses.splice(enrollmentIndex, 1)
+          await Course.updateOne({ _id: payment.course }, { $inc: { totalStudents: -1 } }, { session })
+        }
+      }
+
+      await user.save({ session })
+    }
+
+    if (payment.discount) {
+      await Discount.updateOne({ _id: payment.discount }, { $inc: { usedCount: -1 } }, { session })
+    }
+
+    await session.commitTransaction()
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        refundId: payment._id,
+        amount: payment.amount,
+        refundedAmount: payment.discountedAmount || payment.amount,
+        refundedAt: payment.refundedAt,
+      },
+    })
+  } catch (error) {
+    await session.abortTransaction()
+    next(error)
+  } finally {
+    session.endSession()
+  }
+}
+
 
 // Verify Coupon
 exports.verifyCoupon = async (req, res, next) => {
@@ -1532,3 +1517,669 @@ exports.IPN_URL = `${process.env.API_URL}/api/payments/ipn`
 //     next(error)
 //   }
 // }
+
+
+/*
+course,module payment and payment verification legacy code
+
+// Validation Schemas
+const initiatePaymentSchema = Joi.object({
+  discountCode: Joi.string().trim(),
+  redirectUrl: Joi.string().uri().required(),
+}).options({ abortEarly: false })
+
+const initiateModulePaymentSchema = Joi.object({
+  moduleIds: Joi.array()
+    .items(Joi.string().regex(/^[0-9a-fA-F]{24}$/))
+    .min(1)
+    .required(),
+  discountCode: Joi.string().trim(),
+  redirectUrl: Joi.string().uri().required(),
+}).options({ abortEarly: false })
+
+// Course Payment Initiation
+exports.initiateCoursePayment = async (req, res, next) => {
+  const session = await mongoose.startSession()
+  session.startTransaction()
+
+  try {
+    const { error, value } = initiatePaymentSchema.validate(req.body)
+    if (error) {
+      return res.status(400).json({
+        status: 'error',
+        errors: error.details.map(detail => ({
+          field: detail.context.key,
+          message: detail.message
+        }))
+      })
+    }
+
+    const course = await Course.findOne({
+      _id: req.params.courseId,
+      isDeleted: false
+    }).session(session)
+
+    if (!course) {
+      await session.abortTransaction()
+      return next(new AppError('Course not found', 404))
+    }
+
+    // Enhanced access verification
+    const canPurchase = await verifyAccess(req.user._id, course._id)
+    if (!canPurchase) {
+      await session.abortTransaction()
+      return next(new AppError('You already have access to this course', 400))
+    }
+
+    // Calculate discounted amount if discount code provided
+    const { discountedAmount, discount } = await calculateDiscountedAmount(
+      course.price,
+      value.discountCode,
+      course._id
+    )
+
+    // Generate unique transaction ID
+    const transactionId = crypto.randomBytes(16).toString('hex')
+
+    // Create payment record with additional tracking
+    const payment = await Payment.create([{
+      user: req.user._id,
+      course: course._id,
+      purchaseType: 'course',
+      amount: course.price,
+      discount,
+      discountedAmount,
+      transactionId,
+      status: 'pending',
+      createdAt: new Date(),
+      meta: {
+        courseTitle: course.title,
+        userEmail: req.user.email
+      }
+    }], { session })
+
+    // Prepare SSLCommerz data with improved customer info
+    const sslData = {
+      total_amount: discountedAmount,
+      currency: 'BDT',
+      tran_id: transactionId,
+      success_url: `${value.redirectUrl}?status=success&tran_id=${transactionId}`,
+      fail_url: `${value.redirectUrl}?status=fail&tran_id=${transactionId}`,
+      cancel_url: `${value.redirectUrl}?status=cancel&tran_id=${transactionId}`,
+      ipn_url: `${process.env.API_URL}/api/payments/ipn`,
+      shipping_method: 'NO',
+      product_name: course.title,
+      product_category: 'Course',
+      product_profile: 'general',
+      cus_name: `${req.user.firstName} ${req.user.lastName}`,
+      cus_email: req.user.email,
+      cus_add1: 'Customer Address',
+      cus_city: 'Customer City',
+      cus_country: 'Bangladesh',
+      value_a: course._id.toString(), // Additional reference data
+      value_b: 'course',
+      value_c: req.user._id.toString()
+    }
+
+    // Initiate SSLCommerz payment
+    const sslResponse = await initiatePayment(sslData)
+
+    // Update payment record with SSLCommerz session
+    await Payment.findByIdAndUpdate(
+      payment[0]._id,
+      { 
+        sslcommerzSessionKey: sslResponse.sessionkey,
+        gatewayData: sslResponse // Store complete gateway response
+      },
+      { session }
+    )
+
+    await session.commitTransaction()
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        gatewayRedirectUrl: sslResponse.GatewayPageURL,
+        transactionId,
+        amount: discountedAmount,
+        courseId: course._id
+      }
+    })
+  } catch (error) {
+    await session.abortTransaction()
+    next(error)
+  } finally {
+    session.endSession()
+  }
+}
+
+// Module Payment Initiation
+exports.initiateModulePayment = async (req, res, next) => {
+  const session = await mongoose.startSession()
+  session.startTransaction()
+
+  try {
+    const { error, value } = initiateModulePaymentSchema.validate(req.body)
+    if (error) {
+      return res.status(400).json({
+        status: 'error',
+        errors: error.details.map(detail => ({
+          field: detail.context.key,
+          message: detail.message
+        }))
+      })
+    }
+
+    const { moduleIds } = value
+
+    // Find course and validate modules in parallel
+    const [course, modules] = await Promise.all([
+      Course.findOne({
+        _id: req.params.courseId,
+        isDeleted: false
+      }).session(session),
+      Module.find({
+        _id: { $in: moduleIds },
+        course: req.params.courseId,
+        isDeleted: false
+      }).session(session)
+    ])
+
+    if (!course) {
+      await session.abortTransaction()
+      return next(new AppError('Course not found', 404))
+    }
+
+    if (modules.length !== moduleIds.length) {
+      await session.abortTransaction()
+      return next(new AppError('One or more modules not found', 404))
+    }
+
+    // Enhanced access verification
+    const canPurchase = await verifyAccess(req.user._id, course._id, moduleIds)
+    if (!canPurchase) {
+      await session.abortTransaction()
+      return next(new AppError('You already have access to one or more of these modules', 400))
+    }
+
+    // Calculate total amount
+    const totalAmount = course.modulePrice * modules.length
+
+    // Calculate discounted amount if discount code provided
+    const { discountedAmount, discount } = await calculateDiscountedAmount(
+      totalAmount,
+      value.discountCode,
+      course._id
+    )
+
+    // Generate unique transaction ID
+    const transactionId = crypto.randomBytes(16).toString('hex')
+
+    // Create payment record with additional tracking
+    const payment = await Payment.create([{
+      user: req.user._id,
+      course: course._id,
+      purchaseType: 'module',
+      modules: moduleIds,
+      amount: totalAmount,
+      discount,
+      discountedAmount,
+      transactionId,
+      status: 'pending',
+      createdAt: new Date(),
+      meta: {
+        courseTitle: course.title,
+        moduleCount: modules.length,
+        userEmail: req.user.email,
+        moduleDetails: modules.map(m => ({
+          id: m._id,
+          title: m.title
+        }))
+      }
+    }], { session })
+
+    // Prepare SSLCommerz data with improved details
+    const sslData = {
+      total_amount: discountedAmount,
+      currency: 'BDT',
+      tran_id: transactionId,
+      success_url: `${value.redirectUrl}?status=success&tran_id=${transactionId}`,
+      fail_url: `${value.redirectUrl}?status=fail&tran_id=${transactionId}`,
+      cancel_url: `${value.redirectUrl}?status=cancel&tran_id=${transactionId}`,
+      ipn_url: `${process.env.API_URL}/api/payments/ipn`,
+      shipping_method: 'NO',
+      product_name: `${course.title} - ${modules.length} Modules`,
+      product_category: 'Course Modules',
+      product_profile: 'general',
+      cus_name: `${req.user.firstName} ${req.user.lastName}`,
+      cus_email: req.user.email,
+      cus_add1: 'Customer Address',
+      cus_city: 'Customer City',
+      cus_country: 'Bangladesh',
+      value_a: course._id.toString(),
+      value_b: 'module',
+      value_c: req.user._id.toString(),
+      value_d: moduleIds.join(',')
+    }
+
+    // Initiate SSLCommerz payment
+    const sslResponse = await initiatePayment(sslData)
+
+    // Update payment record with SSLCommerz session
+    await Payment.findByIdAndUpdate(
+      payment[0]._id,
+      { 
+        sslcommerzSessionKey: sslResponse.sessionkey,
+        gatewayData: sslResponse
+      },
+      { session }
+    )
+
+    await session.commitTransaction()
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        gatewayRedirectUrl: sslResponse.GatewayPageURL,
+        transactionId,
+        amount: discountedAmount,
+        courseId: course._id,
+        moduleIds
+      }
+    })
+  } catch (error) {
+    await session.abortTransaction()
+    next(error)
+  } finally {
+    session.endSession()
+  }
+}
+
+// Payment Verification
+exports.verifyPayment = async (req, res, next) => {
+  const session = await mongoose.startSession()
+  session.startTransaction()
+
+  try {
+    const { tran_id, status } = req.body
+
+    const payment = await Payment.findOne({
+      transactionId: tran_id,
+      status: 'pending'
+    }).session(session)
+
+    if (!payment) {
+      await session.abortTransaction()
+      return next(new AppError('Invalid transaction', 400))
+    }
+
+    // Handle failed payment
+    if (status !== 'VALID') {
+      payment.status = 'failed'
+      payment.validationResponse = req.body
+      await payment.save({ session })
+      await session.commitTransaction()
+
+      return res.status(200).json({
+        status: 'success',
+        data: {
+          verified: false,
+          message: 'Payment validation failed',
+          transactionId: tran_id
+        }
+      })
+    }
+
+    // Validate payment with SSLCommerz
+    const validationResponse = await validatePayment({ val_id: req.body.val_id })
+    payment.validationResponse = validationResponse
+
+    if (validationResponse.status !== 'VALID') {
+      payment.status = 'failed'
+      await payment.save({ session })
+      await session.commitTransaction()
+
+      return res.status(200).json({
+        status: 'success',
+        data: {
+          verified: false,
+          message: 'Gateway validation failed',
+          transactionId: tran_id
+        }
+      })
+    }
+
+    // Process enrollment using helper function
+    await processEnrollment(
+      payment.user,
+      payment.course,
+      payment.purchaseType,
+      payment.modules || [],
+      session
+    )
+
+    // Update payment status
+    payment.status = 'completed'
+    payment.completedAt = new Date()
+    await payment.save({ session })
+
+    // Update course total students if needed
+    const existingEnrollment = await User.findOne({
+      _id: payment.user,
+      'enrolledCourses.course': payment.course
+    }).session(session)
+
+    if (!existingEnrollment) {
+      await Course.updateOne(
+        { _id: payment.course },
+        { $inc: { totalStudents: 1 } },
+        { session }
+      )
+    }
+
+    // Update discount usage if applicable
+    if (payment.discount) {
+      await Discount.updateOne(
+        { _id: payment.discount },
+        { $inc: { usedCount: 1 } },
+        { session }
+      )
+    }
+
+    await session.commitTransaction()
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        verified: true,
+        enrollment: {
+          type: payment.purchaseType,
+          courseId: payment.course,
+          moduleIds: payment.modules,
+          amount: payment.discountedAmount || payment.amount
+        }
+      }
+    })
+  } catch (error) {
+    await session.abortTransaction()
+    next(error)
+  } finally {
+    session.endSession()
+  }
+}
+
+// IPN Handler
+exports.handleIPN = async (req, res) => {
+  const session = await mongoose.startSession()
+  session.startTransaction()
+
+  try {
+    const payment = await Payment.findOne({
+      transactionId: req.body.tran_id,
+      status: 'pending'
+    }).session(session)
+
+    if (payment) {
+      payment.ipnResponse = req.body
+      payment.lastIpnReceived = new Date()
+      
+      // Update payment status based on IPN if needed
+      if (req.body.status === 'VALID' && !payment.validationResponse) {
+        const validationResponse = await validatePayment({ val_id: req.body.val_id })
+        
+        if (validationResponse.status === 'VALID') {
+          payment.status = 'completed'
+          payment.validationResponse = validationResponse
+          payment.completedAt = new Date()
+
+          // Process enrollment
+          await processEnrollment(
+            payment.user,
+            payment.course,
+            payment.purchaseType,
+            payment.modules || [],
+            session
+          )
+
+          // Update course total students if needed
+          const existingEnrollment = await User.findOne({
+            _id: payment.user,
+            'enrolledCourses.course': payment.course
+          }).session(session)
+
+          if (!existingEnrollment) {
+            await Course.updateOne(
+              { _id: payment.course },
+              { $inc: { totalStudents: 1 } },
+              { session }
+            )
+          }
+
+          // Update discount usage
+          if (payment.discount) {
+            await Discount.updateOne(
+              { _id: payment.discount },
+              { $inc: { usedCount: 1 } },
+              { session }
+            )
+          }
+        }
+      }
+
+      await payment.save({ session })
+      await session.commitTransaction()
+    }
+
+    res.status(200).send('IPN_RECEIVED')
+  } catch (error) {
+    await session.abortTransaction()
+    console.error('IPN Error:', error)
+    res.status(500).send('IPN_ERROR')
+  } finally {
+    session.endSession()
+  }
+}
+
+// Request Refund
+exports.requestRefund = async (req, res, next) => {
+  const session = await mongoose.startSession()
+  session.startTransaction()
+
+  try {
+    const { error, value } = refundSchema.validate(req.body)
+    if (error) {
+      return res.status(400).json({
+        status: 'error',
+        errors: error.details.map(detail => ({
+          field: detail.context.key,
+          message: detail.message
+        }))
+      })
+    }
+
+    const payment = await Payment.findOne({
+      _id: req.params.paymentId,
+      user: req.user._id,
+      status: 'completed'
+    }).session(session)
+
+    if (!payment) {
+      await session.abortTransaction()
+      return next(new AppError('Payment not found or not eligible for refund', 404))
+    }
+
+    // Check refund eligibility
+    const refundTimeLimit = 30 * 24 * 60 * 60 * 1000 // 30 days
+    if (Date.now() - payment.createdAt > refundTimeLimit) {
+      await session.abortTransaction()
+      return next(new AppError('Refund time limit exceeded', 400))
+    }
+
+    // Update payment record
+    payment.status = 'refunded'
+    payment.refundReason = value.reason
+    payment.refundedAt = new Date()
+    await payment.save({ session })
+
+    // Handle course/module access removal
+    const user = await User.findById(req.user._id).session(session)
+    const enrollmentIndex = user.enrolledCourses.findIndex(
+      ec => ec.course.toString() === payment.course.toString()
+    )
+
+    if (enrollmentIndex !== -1) {
+      if (payment.purchaseType === 'course') {
+        // Remove entire course enrollment
+        user.enrolledCourses.splice(enrollmentIndex, 1)
+
+        // Decrement course total students
+        await Course.updateOne(
+          { _id: payment.course },
+          { $inc: { totalStudents: -1 } },
+          { session }
+        )
+      } else {
+        // Remove specific modules
+        const enrollment = user.enrolledCourses[enrollmentIndex]
+        enrollment.enrolledModules = enrollment.enrolledModules.filter(
+          em => !payment.modules.includes(em.module.toString())
+        )
+
+        // If no modules left, remove the course enrollment
+        if (enrollment.enrolledModules.length === 0) {
+          user.enrolledCourses.splice(enrollmentIndex, 1)
+          await Course.updateOne(
+            { _id: payment.course },
+            { $inc: { totalStudents: -1 } },
+            { session }
+          )
+        }
+      }
+      
+      await user.save({ session })
+    }
+
+    // Revert discount usage if applicable
+    if (payment.discount) {
+      await Discount.updateOne(
+        { _id: payment.discount },
+        { $inc: { usedCount: -1 } },
+        { session }
+      )
+    }
+
+    await session.commitTransaction()
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Refund processed successfully',
+      data: {
+        refundId: payment._id,
+        amount: payment.amount,
+        refundedAt: payment.refundedAt
+      }
+    })
+  } catch (error) {
+    await session.abortTransaction()
+    next(error)
+  } finally {
+    session.endSession()
+  }
+}
+
+// Get Payment History
+exports.getPaymentHistory = async (req, res, next) => {
+  try {
+    const page = Math.max(parseInt(req.query.page) || 1, 1)
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100)
+    const status = req.query.status
+    const startDate = req.query.startDate ? new Date(req.query.startDate) : null
+    const endDate = req.query.endDate ? new Date(req.query.endDate) : null
+
+    // Build query
+    const query = { user: req.user._id }
+    
+    // Add status filter if valid
+    if (status && ['pending', 'completed', 'failed', 'refunded'].includes(status)) {
+      query.status = status
+    }
+
+    // Add date range filter if provided
+    if (startDate || endDate) {
+      query.createdAt = {}
+      if (startDate) query.createdAt.$gte = startDate
+      if (endDate) query.createdAt.$lte = endDate
+    }
+
+    // Get total count and paginated results
+    const [totalPayments, payments] = await Promise.all([
+      Payment.countDocuments(query),
+      Payment.find(query)
+        .select('-sslcommerzSessionKey -ipnResponse -validationResponse')
+        .populate([
+          {
+            path: 'course',
+            select: 'title thumbnail price modulePrice',
+            match: { isDeleted: false }
+          },
+          {
+            path: 'modules',
+            select: 'title order',
+            match: { isDeleted: false }
+          },
+          {
+            path: 'discount',
+            select: 'code type value'
+          }
+        ])
+        .sort('-createdAt')
+        .skip((page - 1) * limit)
+        .limit(limit)
+    ])
+
+    const totalPages = Math.ceil(totalPayments / limit)
+
+    // Process payment data for response
+    const processedPayments = payments.map(payment => {
+      const paymentObj = payment.toObject()
+
+      // Add additional calculated fields
+      paymentObj.savingsAmount = payment.amount - (payment.discountedAmount || payment.amount)
+      paymentObj.paymentDate = payment.createdAt
+      
+      // Add module count for module purchases
+      if (payment.purchaseType === 'module' && payment.modules) {
+        paymentObj.moduleCount = payment.modules.length
+      }
+
+      return paymentObj
+    })
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        payments: processedPayments,
+        pagination: {
+          currentPage: page,
+          totalPages,
+          totalPayments,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1,
+          limit
+        },
+        summary: {
+          totalSpent: processedPayments.reduce((sum, p) => 
+            sum + (p.discountedAmount || p.amount), 0
+          ),
+          totalSaved: processedPayments.reduce((sum, p) => 
+            sum + (p.savingsAmount || 0), 0
+          )
+        }
+      }
+    })
+  } catch (error) {
+    next(error)
+  }
+}
+
+*/
