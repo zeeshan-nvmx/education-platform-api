@@ -328,6 +328,60 @@ moduleSchema.pre('findOne', function () {
   this.where({ isDeleted: false })
 })
 
+// const lessonSchema = new mongoose.Schema(
+//   {
+//     title: {
+//       type: String,
+//       required: true,
+//       trim: true,
+//     },
+//     description: String,
+//     module: {
+//       type: mongoose.Schema.Types.ObjectId,
+//       ref: 'Module',
+//       required: true,
+//       index: true,
+//     },
+//     order: {
+//       type: Number,
+//       required: true,
+//       index: true,
+//     },
+//     videoUrl: String,
+//     cloudflareVideoId: String,
+//     duration: Number,
+//     requireQuizPass: {
+//       type: Boolean,
+//       default: false,
+//     },
+//     quiz: {
+//       type: mongoose.Schema.Types.ObjectId,
+//       ref: 'Quiz',
+//     },
+//     isDeleted: {
+//       type: Boolean,
+//       default: false,
+//       index: true,
+//     },
+//     videoUrl: String,
+//     dashUrl: String,
+//     rawUrl: String,
+//     cloudflareVideoId: String,
+//     duration: Number,
+//     thumbnail: String,
+//     videoMeta: {
+//       size: Number,
+//       created: String,
+//       modified: String,
+//       status: String,
+//     }
+//   },
+//   {
+//     timestamps: true,
+//     strictPopulate: false,
+//   }
+// )
+
 const lessonSchema = new mongoose.Schema(
   {
     title: {
@@ -336,6 +390,11 @@ const lessonSchema = new mongoose.Schema(
       trim: true,
     },
     description: String,
+    // New field for rich text content
+    details: {
+      type: String,
+      maxLength: 50000, // 50KB limit for rich text content
+    },
     module: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Module',
@@ -347,22 +406,7 @@ const lessonSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
-    videoUrl: String,
-    cloudflareVideoId: String,
-    duration: Number,
-    requireQuizPass: {
-      type: Boolean,
-      default: false,
-    },
-    quiz: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Quiz',
-    },
-    isDeleted: {
-      type: Boolean,
-      default: false,
-      index: true,
-    },
+    // Video related fields
     videoUrl: String,
     dashUrl: String,
     rawUrl: String,
@@ -374,13 +418,139 @@ const lessonSchema = new mongoose.Schema(
       created: String,
       modified: String,
       status: String,
-    }
+    },
+    // Downloadable assets/files
+    assets: [
+      {
+        title: {
+          type: String,
+          required: true,
+          trim: true,
+        },
+        description: String,
+        fileUrl: {
+          type: String,
+          required: true,
+        },
+        fileKey: {
+          type: String,
+          required: true,
+        },
+        fileType: String,
+        fileSize: Number,
+        downloadCount: {
+          type: Number,
+          default: 0,
+        },
+        uploadedAt: {
+          type: Date,
+          default: Date.now,
+        },
+        isPublic: {
+          type: Boolean,
+          default: false,
+        },
+      },
+    ],
+    //  quiz settings
+    quiz: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Quiz',
+    },
+    quizSettings: {
+      required: {
+        type: Boolean,
+        default: false,
+      },
+      minimumPassingScore: {
+        type: Number,
+        min: 0,
+        max: 100,
+        default: 70,
+      },
+      allowReview: {
+        type: Boolean,
+        default: true,
+      },
+      // Controls whether to block next lesson until quiz is completed
+      blockProgress: {
+        type: Boolean,
+        default: true,
+      },
+      // Controls whether to show quiz before/after lesson content
+      showQuizAt: {
+        type: String,
+        enum: ['before', 'after', 'any'],
+        default: 'after',
+      },
+      // Minimum time spent on lesson before attempting quiz
+      minimumTimeRequired: {
+        type: Number, // in minutes
+        min: 0,
+        default: 0,
+      },
+    },
+    // Content requirements for completion
+    completionRequirements: {
+      watchVideo: {
+        type: Boolean,
+        default: false,
+      },
+      downloadAssets: [
+        {
+          assetId: {
+            type: mongoose.Schema.Types.ObjectId,
+          },
+          required: {
+            type: Boolean,
+            default: false,
+          },
+        },
+      ],
+      minimumTimeSpent: {
+        type: Number, // in minutes
+        default: 0,
+      },
+    },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
   },
   {
     timestamps: true,
     strictPopulate: false,
   }
 )
+
+// Virtual to check if the lesson has a quiz
+lessonSchema.virtual('hasQuiz').get(function () {
+  return !!this.quiz
+})
+
+// Virtual to check if the lesson has required assets
+lessonSchema.virtual('hasRequiredAssets').get(function () {
+  return this.completionRequirements.downloadAssets.some((asset) => asset.required)
+})
+
+// Pre-save middleware to enforce consistent quiz settings
+lessonSchema.pre('save', function (next) {
+  if (this.isModified('quiz') || this.isModified('quizSettings')) {
+    if (!this.quiz) {
+      // Reset quiz settings if no quiz is attached
+      this.quizSettings = {
+        required: false,
+        minimumPassingScore: 70,
+        allowReview: true,
+        blockProgress: true,
+        showQuizAt: 'after',
+        minimumTimeRequired: 0,
+      }
+    }
+  }
+  next()
+})
 
 lessonSchema.pre('find', function () {
   this.where({ isDeleted: false })
@@ -390,6 +560,7 @@ lessonSchema.pre('findOne', function () {
   this.where({ isDeleted: false })
 })
 
+// Quiz Schema
 const quizSchema = new mongoose.Schema(
   {
     lesson: {
@@ -403,47 +574,113 @@ const quizSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
-    type: {
-      type: String,
-      enum: ['mcq', 'trueFalse', 'written'],
+    description: String,
+    instructions: String,
+    duration: {
+      type: Number, // in minutes
       required: true,
+      min: 1
     },
     passingScore: {
       type: Number,
       required: true,
+      min: 0,
+      max: 100,
     },
-    timeLimit: Number,
-    questions: [
-      {
-        question: {
-          type: String,
-          required: true,
-        },
-        options: [String],
-        correctAnswer: String,
-        points: {
-          type: Number,
-          default: 1,
-        },
+    maxAttempts: {
+      type: Number,
+      required: true,
+      default: 3,
+      min: 1
+    },
+    shuffleQuestions: {
+      type: Boolean,
+      default: false
+    },
+    shuffleOptions: {
+      type: Boolean,
+      default: false
+    },
+    showResults: {
+      type: Boolean, // Whether to show correct answers after submission
+      default: true
+    },
+    questions: [{
+      questionText: {
+        type: String,
+        required: true
       },
-    ],
+      type: {
+        type: String,
+        enum: ['mcq', 'fillInGaps', 'essay'],
+        required: true
+      },
+      marks: {
+        type: Number,
+        required: true,
+        default: 1
+      },
+      // For MCQ
+      options: [{
+        text: String,
+        isCorrect: Boolean
+      }],
+      // For fill in gaps
+      gapAnswers: [{
+        position: Number,
+        correctAnswer: String,
+        caseSensitive: {
+          type: Boolean,
+          default: false
+        },
+        alternativeAnswers: [String] // Accept multiple possible answers
+      }],
+      // For essay questions
+      rubric: {
+        criteria: [{
+          name: String,
+          description: String,
+          maxScore: Number
+        }],
+        totalMarks: Number
+      },
+      explanation: String // Explanation shown after attempt (if showResults is true)
+    }],
+    totalMarks: {
+      type: Number,
+      required: true
+    },
+    requireManualGrading: {
+      type: Boolean,
+      default: false
+    },
+    gradingInProgress: {
+      type: Boolean,
+      default: false
+    },
     isDeleted: {
       type: Boolean,
       default: false,
       index: true,
     },
   },
-  { timestamps: true }
+  { 
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true }
+  }
 )
 
-quizSchema.pre('find', function () {
-  this.where({ isDeleted: false })
+// Quiz schema middleware to calculate total marks
+quizSchema.pre('save', function(next) {
+  if (this.isModified('questions')) {
+    this.totalMarks = this.questions.reduce((sum, question) => sum + question.marks, 0)
+    this.requireManualGrading = this.questions.some(q => q.type === 'essay')
+  }
+  next()
 })
 
-quizSchema.pre('findOne', function () {
-  this.where({ isDeleted: false })
-})
-
+// Quiz Attempt Schema
 const quizAttemptSchema = new mongoose.Schema(
   {
     quiz: {
@@ -458,31 +695,100 @@ const quizAttemptSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
-    answers: [
-      {
-        question: {
-          type: mongoose.Schema.Types.ObjectId,
-          required: true,
-        },
-        answer: String,
-        isCorrect: Boolean,
-        points: Number,
-      },
-    ],
-    score: Number,
-    passed: Boolean,
-    gradedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
+    startedAt: {
+      type: Date,
+      required: true,
     },
     submittedAt: {
       type: Date,
-      default: Date.now,
       index: true,
     },
+    answers: [{
+      question: {
+        type: mongoose.Schema.Types.ObjectId,
+        required: true,
+      },
+      type: {
+        type: String,
+        enum: ['mcq', 'fillInGaps', 'essay'],
+        required: true,
+      },
+      // For MCQ
+      selectedOptions: [{
+        type: String
+      }],
+      // For fill in gaps
+      gapAnswers: [{
+        position: Number,
+        answer: String
+      }],
+      // For essay
+      essayAnswer: {
+        text: String,
+        attachments: [{
+          url: String,
+          key: String,
+          name: String,
+          type: String
+        }]
+      },
+      // Grading
+      marks: Number,
+      feedback: String,
+      rubricScores: [{
+        criteriaName: String,
+        score: Number,
+        feedback: String
+      }],
+      isCorrect: Boolean,
+      autoGraded: Boolean
+    }],
+    score: Number,
+    percentage: Number,
+    passed: Boolean,
+    attempt: {
+      type: Number,
+      required: true,
+    },
+    gradedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    gradingComplete: {
+      type: Boolean,
+      default: false,
+      index: true
+    },
+    status: {
+      type: String,
+      enum: ['inProgress', 'submitted', 'grading', 'completed'],
+      default: 'inProgress',
+      index: true
+    },
+    timeSpent: Number, // in seconds
   },
-  { timestamps: true }
+  { 
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true }
+  }
 )
+
+// Index for checking attempt limits
+quizAttemptSchema.index({ quiz: 1, user: 1, attempt: 1 }, { unique: true })
+
+// Virtual for remaining time
+quizAttemptSchema.virtual('remainingTime').get(function() {
+  if (this.status !== 'inProgress' || !this.startedAt) return 0
+  
+  const quiz = this.quiz
+  if (!quiz || !quiz.duration) return 0
+  
+  const endTime = new Date(this.startedAt.getTime() + quiz.duration * 60000)
+  const remaining = endTime - new Date()
+  
+  return Math.max(0, Math.floor(remaining / 1000))
+})
 
 const paymentSchema = new mongoose.Schema(
   {
@@ -721,6 +1027,122 @@ reviewSchema.post('save', async function () {
   })
 })
 
+// Progress tracking schemas
+const lessonProgressSchema = new mongoose.Schema(
+  {
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true,
+    },
+    lesson: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Lesson',
+      required: true,
+      index: true,
+    },
+    timeSpent: {
+      type: Number, // in seconds
+      default: 0,
+      min: 0
+    },
+    lastAccessed: {
+      type: Date,
+      default: Date.now,
+      index: true
+    }
+  },
+  { 
+    timestamps: true 
+  }
+)
+
+// Index for querying lesson progress
+lessonProgressSchema.index({ user: 1, lesson: 1 }, { unique: true })
+
+const videoProgressSchema = new mongoose.Schema(
+  {
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true,
+    },
+    lesson: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Lesson',
+      required: true,
+      index: true,
+    },
+    watchedTime: {
+      type: Number, // in seconds
+      default: 0,
+      min: 0
+    },
+    lastPosition: {
+      type: Number, // in seconds
+      default: 0,
+      min: 0
+    },
+    completed: {
+      type: Boolean,
+      default: false
+    },
+    lastAccessed: {
+      type: Date,
+      default: Date.now
+    }
+  },
+  { 
+    timestamps: true 
+  }
+)
+
+// Index for querying video progress
+videoProgressSchema.index({ user: 1, lesson: 1 }, { unique: true })
+
+const assetProgressSchema = new mongoose.Schema(
+  {
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true,
+    },
+    lesson: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Lesson',
+      required: true,
+      index: true,
+    },
+    asset: {
+      type: mongoose.Schema.Types.ObjectId,
+      required: true,
+      index: true,
+    },
+    downloadCount: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    firstDownloaded: {
+      type: Date,
+      default: Date.now
+    },
+    lastDownloaded: {
+      type: Date,
+      default: Date.now
+    }
+  },
+  { 
+    timestamps: true 
+  }
+)
+
+// Index for querying asset downloads
+assetProgressSchema.index({ user: 1, lesson: 1, asset: 1 }, { unique: true })
+
 module.exports = {
   User: mongoose.model('User', userSchema),
   Course: mongoose.model('Course', courseSchema),
@@ -732,6 +1154,9 @@ module.exports = {
   Discount: mongoose.model('Discount', discountSchema),
   Progress: mongoose.model('Progress', progressSchema),
   Review: mongoose.model('Review', reviewSchema),
+  LessonProgress : mongoose.model('LessonProgress', lessonProgressSchema),
+  VideoProgress : mongoose.model('VideoProgress', videoProgressSchema),
+  AssetProgress : mongoose.model('AssetProgress', assetProgressSchema)
 }
 
 // const mongoose = require('mongoose')
