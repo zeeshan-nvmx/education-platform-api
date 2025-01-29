@@ -24,4 +24,4 @@ const parseFormDataJSON = (req, res, next) => {
 // // Apply this middleware globally before validation
 // app.use(parseFormDataJSON)
 
-export default parseFormDataJSON
+module.exports = parseFormDataJSON

@@ -18,7 +18,8 @@ const {
   updateAsset,
   deleteAsset,
 } = require('../controllers/lesson.controller')
-const { default: parseFormDataJSON } = require('../middleware/parseFormData')
+
+const parseFormDataJSON = require('../middleware/parseFormData')
 
 const router = express.Router({ mergeParams: true })
 

@@ -3,6 +3,7 @@ const { protect, restrictTo } = require('../middleware/auth')
 const { checkCourseOwnership } = require('../middleware/checkOwnership')
 const validateMongoId = require('../middleware/validateMongoId')
 
+
 // Import lesson router
 const lessonRouter = require('./lesson.routes')
 
