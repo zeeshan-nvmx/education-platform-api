@@ -261,8 +261,6 @@ exports.getModules = async (req, res, next) => {
       ])
       .sort('order')
       .lean()
-    
-    console.log(req)
 
     // If user has admin access, return all modules with full access
     if (hasAdminAccess(req.user)) {

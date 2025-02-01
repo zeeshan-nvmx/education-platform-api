@@ -50,7 +50,6 @@ const { AppError } = require('../utils/errors')
 
 exports.protect = async (req, res, next) => {
   try {
-    console.log('Protect middleware - Starting')
 
     let token
     if (req.headers.authorization?.startsWith('Bearer')) {
@@ -74,11 +73,11 @@ exports.protect = async (req, res, next) => {
     // Set default enrolledCourses if it doesn't exist
     user.enrolledCourses = user.enrolledCourses || []
 
-    console.log('Protect middleware - User found:', {
-      userId: user._id,
-      role: user.role,
-      hasEnrolledCourses: Array.isArray(user.enrolledCourses),
-    })
+    // console.log('Protect middleware - User found:', {
+    //   userId: user._id,
+    //   role: user.role,
+    //   hasEnrolledCourses: Array.isArray(user.enrolledCourses),
+    // })
 
     req.user = user
     next()
