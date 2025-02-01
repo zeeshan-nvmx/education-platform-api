@@ -4,6 +4,11 @@ const mongoose = require('mongoose')
 const { Module, Course, Lesson, User, Progress } = require('../models')
 const { AppError } = require('../utils/errors')
 
+// Helper function to check if user has admin privileges
+const hasAdminAccess = (user) => {
+  return ['admin', 'subAdmin', 'moderator'].includes(user?.role);
+};
+
 // Validation Schemas
 const moduleSchema = Joi.object({
   title: Joi.string().required().trim(),
@@ -230,91 +235,99 @@ exports.createModule = async (req, res, next) => {
 }
 
 // Get All Modules
+
 exports.getModules = async (req, res, next) => {
   try {
+    if (!req.user?._id) {
+      return next(new AppError('Authentication required', 401))
+    }
+
+    // Get all modules first
     const modules = await Module.find({
       course: req.params.courseId,
-      isDeleted: false
+      isDeleted: false,
     })
       .populate([
         {
           path: 'prerequisites',
           select: 'title order',
-          match: { isDeleted: false }
+          match: { isDeleted: false },
         },
         {
           path: 'dependencies.module',
           select: 'title order',
-          match: { isDeleted: false }
-        }
+          match: { isDeleted: false },
+        },
       ])
       .sort('order')
+      .lean()
+    
+    console.log(req)
 
-    // Get enrollment status for all modules
-    const enrollment = await User.findOne(
-      {
-        _id: req.user._id,
-        'enrolledCourses.course': req.params.courseId
-      },
-      { 'enrolledCourses.$': 1 }
-    )
+    // If user has admin access, return all modules with full access
+    if (hasAdminAccess(req.user)) {
+      const modulesWithAccess = modules.map((module) => ({
+        ...module,
+        enrollment: {
+          hasAccess: true,
+          type: 'admin',
+          progress: null,
+        },
+      }))
 
-    const modulesWithStatus = await Promise.all(
-      modules.map(async (module) => {
-        const moduleObj = module.toObject()
-
-        if (enrollment) {
-          const enrolledCourse = enrollment.enrolledCourses[0]
-          const hasFullAccess = enrolledCourse.enrollmentType === 'full'
-          const hasModuleAccess = enrolledCourse.enrolledModules.some(
-            em => em.module.toString() === module._id.toString()
-          )
-
-          moduleObj.enrollment = {
-            hasAccess: hasFullAccess || hasModuleAccess,
-            type: enrolledCourse.enrollmentType
-          }
-
-          if (hasFullAccess || hasModuleAccess) {
-            const progress = await Progress.findOne({
-              user: req.user._id,
-              course: req.params.courseId,
-              module: module._id
-            })
-
-            if (progress) {
-              moduleObj.enrollment.progress = {
-                overall: progress.progress,
-                completedLessons: progress.completedLessons,
-                completedQuizzes: progress.completedQuizzes,
-                lastAccessed: progress.lastAccessed
-              }
-            }
-          }
-
-          if (module.prerequisites?.length > 0) {
-            moduleObj.prerequisitesMet = await checkPrerequisitesCompletion(
-              module.prerequisites,
-              req.user._id,
-              req.params.courseId
-            )
-          }
-        }
-
-        return moduleObj
+      return res.status(200).json({
+        status: 'success',
+        message: 'Modules fetched successfully',
+        data: modulesWithAccess,
       })
-    )
+    }
+
+    // For regular users, check enrollment
+    const user = await User.findById(req.user._id).select('enrolledCourses').lean()
+
+    if (!user) {
+      return next(new AppError('User not found', 404))
+    }
+
+    const enrolledCourse = user.enrolledCourses?.find((course) => course?.course?.toString() === req.params.courseId)
+
+    const modulesWithStatus = modules.map((module) => {
+      const moduleObj = {
+        ...module,
+        enrollment: {
+          hasAccess: false,
+          type: null,
+          progress: null,
+        },
+      }
+
+      if (enrolledCourse) {
+        const hasFullAccess = enrolledCourse.enrollmentType === 'full'
+        const hasModuleAccess = enrolledCourse.enrolledModules?.some((em) => em?.module?.toString() === module._id.toString())
+
+        moduleObj.enrollment = {
+          hasAccess: hasFullAccess || hasModuleAccess,
+          type: enrolledCourse.enrollmentType,
+        }
+      }
+
+      return moduleObj
+    })
 
     res.status(200).json({
+      status: 'success',
       message: 'Modules fetched successfully',
-      data: modulesWithStatus
+      data: modulesWithStatus,
     })
   } catch (error) {
     next(error)
   }
 }
 
+
+
 // Get Single Module
+
 exports.getModule = async (req, res, next) => {
   try {
     const module = await Module.findOne({

@@ -9,6 +9,7 @@ const validateMongoId = require('../middleware/validateMongoId')
 const moduleRouter = require('./module.routes')
 const lessonRouter = require('./lesson.routes')
 
+
 // Configure multer for memory storage
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -48,6 +49,10 @@ const {
 } = require('../controllers/course.controller')
 
 const router = express.Router()
+
+// Mount module routes
+router.use('/:courseId/modules', moduleRouter);
+
 
 // Public routes
 router.get('/featured', getFeaturedCourses)
