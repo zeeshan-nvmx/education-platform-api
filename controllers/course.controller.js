@@ -131,6 +131,114 @@ exports.createCourse = async (req, res, next) => {
   }
 }
 
+exports.getPublicCoursesList = async (req, res, next) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const search = req.query.search;
+    const category = req.query.category;
+    const sortBy = req.query.sortBy || 'createdAt';
+    const order = req.query.order || 'desc';
+
+    // Build query
+    const query = { isDeleted: false };
+
+    if (category) {
+      query.category = category;
+    }
+
+    if (search) {
+      query.$text = { $search: search };
+    }
+
+    // Get total count for pagination
+    const totalCourses = await Course.countDocuments(query);
+
+    // Fetch courses with populated data
+    const courses = await Course.find(query)
+      .select('title description category thumbnail price modulePrice rating totalStudents featured createdAt')
+      .populate({
+        path: 'creator',
+        select: 'firstName lastName'
+      })
+      .populate({
+        path: 'modules',
+        match: { isDeleted: false },
+        select: 'title description order',
+        options: { sort: { order: 1 } },
+        populate: {
+          path: 'lessons',
+          match: { isDeleted: false },
+          select: 'title description order duration requireQuizPass',
+          options: { sort: { order: 1 } }
+        }
+      })
+      .sort({ [sortBy]: order === 'desc' ? -1 : 1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean();
+
+    // Transform the data to include only necessary information
+    const transformedCourses = courses.map(course => ({
+      _id: course._id,
+      title: course.title,
+      description: course.description,
+      category: course.category,
+      thumbnail: course.thumbnail,
+      price: course.price,
+      modulePrice: course.modulePrice,
+      rating: course.rating,
+      totalStudents: course.totalStudents,
+      featured: course.featured,
+      createdAt: course.createdAt,
+      creator: {
+        name: `${course.creator.firstName} ${course.creator.lastName}`
+      },
+      modules: course.modules.map(module => ({
+        _id: module._id,
+        title: module.title,
+        description: module.description,
+        order: module.order,
+        totalLessons: module.lessons?.length || 0,
+        lessons: module.lessons.map(lesson => ({
+          _id: lesson._id,
+          title: lesson.title,
+          description: lesson.description,
+          order: lesson.order,
+          duration: lesson.duration,
+          hasQuiz: lesson.requireQuizPass
+        }))
+      })),
+      statistics: {
+        totalModules: course.modules.length,
+        totalLessons: course.modules.reduce((acc, module) => acc + (module.lessons?.length || 0), 0),
+        totalDuration: course.modules.reduce((acc, module) => 
+          acc + module.lessons.reduce((sum, lesson) => sum + (lesson.duration || 0), 0), 0)
+      }
+    }));
+
+    // Calculate total pages
+    const totalPages = Math.ceil(totalCourses / limit);
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Courses fetched successfully',
+      data: {
+        courses: transformedCourses,
+        pagination: {
+          currentPage: page,
+          totalPages,
+          totalCourses,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1
+        }
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.getAllCourses = async (req, res, next) => {
   try {
     const { error, value } = querySchema.validate(req.query)

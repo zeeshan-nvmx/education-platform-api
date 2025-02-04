@@ -860,6 +860,7 @@ exports.getModuleEnrollmentStatus = async (req, res, next) => {
     if (!hasAccess) {
       return res.status(200).json({
         status: 'success',
+        message: 'Module enrollment status fetched successfully',
         data: {
           hasAccess: false,
           reason: 'module_not_purchased',

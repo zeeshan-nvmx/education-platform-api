@@ -6,33 +6,6 @@ const CloudflareService = require('../utils/cloudflare')
 const { uploadToS3, deleteFromS3, uploadMultipleToS3, deleteMultipleFromS3, fileConfig } = require('../utils/s3')
 const sanitizeHtml = require('sanitize-html')
 
-// Validation Schemas
-// const lessonSchema = Joi.object({
-//   title: Joi.string().required().trim(),
-//   description: Joi.string().allow('').trim(),
-//   details: Joi.string().allow('').max(50000), // Rich text content
-//   order: Joi.number().integer().min(1).required(),
-//   completionRequirements: Joi.object({
-//     watchVideo: Joi.boolean().default(false),
-//     downloadAssets: Joi.array().items(
-//       Joi.object({
-//         assetId: Joi.string().regex(/^[0-9a-fA-F]{24}$/),
-//         required: Joi.boolean().default(false),
-//       })
-//     ),
-//     minimumTimeSpent: Joi.number().min(0).default(0),
-//   }),
-//   requireQuizPass: Joi.boolean().default(false),
-//   quizSettings: Joi.object({
-//     required: Joi.boolean().default(false),
-//     minimumPassingScore: Joi.number().min(0).max(100).default(70),
-//     allowReview: Joi.boolean().default(true),
-//     blockProgress: Joi.boolean().default(true),
-//     showQuizAt: Joi.string().valid('before', 'after', 'any').default('after'),
-//     minimumTimeRequired: Joi.number().min(0).default(0),
-//   }),
-// }).options({ abortEarly: false })
-
 const lessonSchema = Joi.object({
   title: Joi.string().required().trim(),
   description: Joi.string().allow('').trim(),
@@ -581,6 +554,7 @@ exports.createLesson = async (req, res, next) => {
 
     res.status(201).json({
       status: 'success',
+      message: 'Lesson created successfully',
       data: populatedLesson,
     })
   } catch (error) {
@@ -663,6 +637,7 @@ exports.getLessons = async (req, res, next) => {
 
     res.status(200).json({
       status: 'success',
+      message: 'Lessons retrieved successfully',
       data: lessonsWithProgress,
     })
   } catch (error) {
@@ -936,6 +911,7 @@ exports.getLesson = async (req, res, next) => {
 
     res.status(200).json({
       status: 'success',
+      message: 'Lesson retrieved successfully',
       data: responseData,
     })
   } catch (error) {
@@ -1070,6 +1046,7 @@ exports.updateLesson = async (req, res, next) => {
 
     res.status(200).json({
       status: 'success',
+      message: 'Lesson updated successfully',
       data: updatedLesson,
     })
   } catch (error) {
@@ -1136,6 +1113,7 @@ exports.addAssets = async (req, res, next) => {
 
     res.status(200).json({
       status: 'success',
+      message: 'Assets uploaded successfully',
       data: {
         assets: newAssets
       }
@@ -1174,6 +1152,7 @@ exports.updateAsset = async (req, res, next) => {
 
     res.status(200).json({
       status: 'success',
+      message: 'Asset updated successfully',
       data: { asset }
     })
   } catch (error) {
@@ -1255,6 +1234,7 @@ exports.downloadAsset = async (req, res, next) => {
 
     res.status(200).json({
       status: 'success',
+      message: 'Asset download URL generated',
       data: {
         downloadUrl,
         fileName: asset.title,
@@ -1388,6 +1368,7 @@ exports.trackProgress = async (req, res, next) => {
 
     res.status(200).json({
       status: 'success',
+      message: 'Progress updated successfully',
       data: progressUpdate,
     })
   } catch (error) {
@@ -1567,6 +1548,7 @@ exports.getVideoStreamUrl = async (req, res, next) => {
 
     res.status(200).json({
       status: 'success',
+      message: 'Video stream URL generated',
       data: {
         streamUrl: videoDetails.playbackUrl,
         dashUrl: videoDetails.dashUrl,
@@ -1636,6 +1618,7 @@ exports.markLessonComplete = async (req, res, next) => {
 
     res.status(200).json({
       status: 'success',
+      message: 'Lesson marked as complete',
       data: {
         progress: progressUpdate.progress,
         completedLessons: progressUpdate.completedLessons,
@@ -1744,6 +1727,7 @@ exports.getLessonProgress = async (req, res, next) => {
 
     res.status(200).json({
       status: 'success',
+      message: 'Lesson progress retrieved successfully',
       data: progressData
     })
   } catch (error) {

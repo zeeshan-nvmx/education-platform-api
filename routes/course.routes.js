@@ -43,9 +43,7 @@ const {
   checkModuleAccess,
   getCourseProgress,
   getModuleProgress,
-  enrollInCourse,
-  enrollInModule,
-  getEnrollmentStatus,
+  getPublicCoursesList,
 } = require('../controllers/course.controller')
 
 const router = express.Router()
@@ -56,6 +54,7 @@ router.use('/:courseId/modules', moduleRouter);
 
 // Public routes
 router.get('/featured', getFeaturedCourses)
+router.get('/public', getPublicCoursesList)
 router.get('/category/:category', getCoursesByCategory)
 router.get('/', getAllCourses)
 router.get('/:courseId', validateMongoId, getCourse)
