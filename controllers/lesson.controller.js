@@ -854,7 +854,7 @@ exports.getLesson = async (req, res, next) => {
         _id: asset._id,
         title: asset.title,
         description: asset.description,
-        fileUrl: asset.isPublic || progress?.completedLessons.includes(lessonId) ? asset.fileUrl : undefined,
+        fileUrl: asset.fileUrl,
         fileType: asset.fileType,
         fileSize: asset.fileSize,
         downloadCount: asset.downloadCount,
