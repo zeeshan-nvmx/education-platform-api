@@ -469,58 +469,119 @@ exports.updateCourse = async (req, res, next) => {
   }
 }
 
+// exports.deleteCourse = async (req, res, next) => {
+//   const session = await mongoose.startSession()
+//   session.startTransaction()
+
+//   try {
+//     const course = await Course.findById(req.params.courseId).session(session)
+//     if (!course) {
+//       await session.abortTransaction()
+//       return next(new AppError('Course not found', 404))
+//     }
+
+//     const activeEnrollments = await User.countDocuments({
+//       'enrolledCourses.course': course._id
+//     }).session(session)
+
+//     if (activeEnrollments > 0) {
+//       course.isDeleted = true
+//       await course.save({ session })
+
+//       await Promise.all([
+//         Module.updateMany({ course: course._id }, { isDeleted: true }, { session }),
+//         Lesson.updateMany(
+//           { module: { $in: await Module.find({ course: course._id }).distinct('_id') } },
+//           { isDeleted: true },
+//           { session }
+//         )
+//       ])
+//     } else {
+//       const imageKeys = [
+//         course.thumbnailKey,
+//         ...course.instructors
+//           .filter(inst => inst.imageKey)
+//           .map(inst => inst.imageKey)
+//       ].filter(Boolean)
+
+//       await cleanupInstructorImages(imageKeys)
+//       await Course.deleteOne({ _id: course._id }).session(session)
+
+//       const modules = await Module.find({ course: course._id })
+//       await Promise.all([
+//         Module.deleteMany({ course: course._id }).session(session),
+//         Lesson.deleteMany({
+//           module: { $in: modules.map(module => module._id) }
+//         }).session(session)
+//       ])
+//     }
+
+//     await session.commitTransaction()
+
+//     res.status(200).json({
+//       message: 'Course deleted successfully'
+//     })
+//   } catch (error) {
+//     await session.abortTransaction()
+//     next(error)
+//   } finally {
+//     session.endSession()
+//   }
+// }
+
 exports.deleteCourse = async (req, res, next) => {
   const session = await mongoose.startSession()
   session.startTransaction()
 
   try {
-    const course = await Course.findById(req.params.courseId).session(session)
+    // Find the course including deleted ones
+    const course = await Course.findOne({ _id: req.params.courseId }).session(session)
     if (!course) {
       await session.abortTransaction()
+      session.endSession()
       return next(new AppError('Course not found', 404))
     }
 
+    // Check for active enrollments
     const activeEnrollments = await User.countDocuments({
-      'enrolledCourses.course': course._id
+      'enrolledCourses.course': course._id,
     }).session(session)
 
     if (activeEnrollments > 0) {
+      // Soft delete course, modules, and lessons
       course.isDeleted = true
       await course.save({ session })
 
+      // Get module IDs first
+      const moduleIds = await Module.find({ course: course._id }).distinct('_id')
+
       await Promise.all([
         Module.updateMany({ course: course._id }, { isDeleted: true }, { session }),
-        Lesson.updateMany(
-          { module: { $in: await Module.find({ course: course._id }).distinct('_id') } },
-          { isDeleted: true },
-          { session }
-        )
+        Lesson.updateMany({ module: { $in: moduleIds } }, { isDeleted: true }, { session }),
       ])
     } else {
-      const imageKeys = [
-        course.thumbnailKey,
-        ...course.instructors
-          .filter(inst => inst.imageKey)
-          .map(inst => inst.imageKey)
-      ].filter(Boolean)
+      // Prepare instructor images for deletion
+      const imageKeys = [course.thumbnailKey, ...course.instructors.filter((inst) => inst.imageKey).map((inst) => inst.imageKey)].filter(Boolean)
 
-      await cleanupInstructorImages(imageKeys)
-      await Course.deleteOne({ _id: course._id }).session(session)
+      // Cleanup instructor images safely
+      try {
+        await cleanupInstructorImages(imageKeys)
+      } catch (cleanupError) {
+        console.error('Failed to clean up instructor images:', cleanupError)
+      }
 
-      const modules = await Module.find({ course: course._id })
+      // Get module IDs before deleting
+      const moduleIds = await Module.find({ course: course._id }).distinct('_id')
+
       await Promise.all([
+        course.deleteOne({ session }),
         Module.deleteMany({ course: course._id }).session(session),
-        Lesson.deleteMany({
-          module: { $in: modules.map(module => module._id) }
-        }).session(session)
+        Lesson.deleteMany({ module: { $in: moduleIds } }).session(session),
       ])
     }
 
     await session.commitTransaction()
-
-    res.status(200).json({
-      message: 'Course deleted successfully'
-    })
+    res.status(200).json({ message: 'Course deleted successfully' })
   } catch (error) {
     await session.abortTransaction()
     next(error)
@@ -528,6 +589,7 @@ exports.deleteCourse = async (req, res, next) => {
     session.endSession()
   }
 }
+
 
 exports.getFeaturedCourses = async (req, res, next) => {
   try {
