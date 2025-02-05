@@ -238,6 +238,7 @@ exports.login = async (req, res, next) => {
       role: user.role,
       email: user.email,
       isEmailVerified: user.isEmailVerified,
+      enrolledCourses: user.enrolledCourses,
     }
 
     res.status(200).json({
