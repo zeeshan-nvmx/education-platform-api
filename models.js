@@ -169,6 +169,10 @@ const courseSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    longDescription: {
+      type: String,
+      maxLength: 50000, // 50KB limit for rich text content
+    },
     category: {
       type: String,
       required: true,

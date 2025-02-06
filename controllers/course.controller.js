@@ -22,6 +22,7 @@ const instructorSchema = Joi.object({
 const courseSchema = Joi.object({
   title: Joi.string().trim(),
   description: Joi.string().trim(),
+  longDescription: Joi.string().trim(),
   category: Joi.string().trim(),
   price: Joi.number().min(0),
   modulePrice: Joi.number().min(0),
