@@ -346,15 +346,33 @@ async function validateAssetIds(assetIds, lessonId) {
   return assetIds.every((assetId) => lesson.assets.some((asset) => asset._id.toString() === assetId))
 }
 
-async function checkModuleAccess(userId, courseId, moduleId) {
-  const user = await User.findOne({
-    _id: userId,
-    'enrolledCourses.course': courseId,
-  })
+// async function checkModuleAccess(userId, courseId, moduleId) {
+//   const user = await User.findOne({
+//     _id: userId,
+//     'enrolledCourses.course': courseId,
+//   })
 
+//   if (!user) return false
+
+//   const enrollment = user.enrolledCourses.find((ec) => ec.course.toString() === courseId)
+//   if (!enrollment) return false
+
+//   if (enrollment.enrollmentType === 'full') return true
+
+//   return enrollment.enrolledModules.some((em) => em.module.toString() === moduleId)
+// }
+
+async function checkModuleAccess(userId, courseId, moduleId) {
+  const user = await User.findById(userId)
   if (!user) return false
 
-  const enrollment = user.enrolledCourses.find((ec) => ec.course.toString() === courseId)
+  // Check if user is admin/subAdmin/moderator
+  if (['admin', 'subAdmin', 'moderator'].includes(user.role)) {
+    return true
+  }
+
+  // Regular check enrollment
+  const enrollment = user.enrolledCourses?.find((ec) => ec.course.toString() === courseId)
   if (!enrollment) return false
 
   if (enrollment.enrollmentType === 'full') return true
