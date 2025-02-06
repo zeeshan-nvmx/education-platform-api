@@ -73,46 +73,92 @@ exports.updateProfile = async (req, res, next) => {
   }
 }
 
+// exports.getEnrolledCourses = async (req, res, next) => {
+//   try {
+//     const user = await User.findById(req.user._id).populate({
+//       path: 'enrolledCourses.course',
+//       select: 'title description thumbnail price rating',
+//     })
+
+//     if (!user) {
+//       return next(new AppError('User not found', 404))
+//     }
+
+//     const enrolledCourses = await Promise.all(
+//       user.enrolledCourses.map(async (enrollment) => {
+//         const progress = await Progress.findOne({
+//           user: req.user._id,
+//           course: enrollment.course._id,
+//         })
+
+//         return {
+//           course: enrollment.course,
+//           enrolledAt: enrollment.enrolledAt,
+//           progress: progress
+//             ? {
+//                 completedLessons: progress.completedLessons.length,
+//                 completedQuizzes: progress.completedQuizzes.length,
+//                 lastAccessed: progress.lastAccessed,
+//               }
+//             : null,
+//         }
+//       })
+//     )
+
+//     res.status(200).json({
+//       message: 'Enrolled courses fetched successfully',
+//       data: enrolledCourses,
+//     })
+//   } catch (error) {
+//     next(error)
+//   }
+// }
+
 exports.getEnrolledCourses = async (req, res, next) => {
   try {
-    const user = await User.findById(req.user._id).populate({
-      path: 'enrolledCourses.course',
-      select: 'title description thumbnail price rating',
-    })
+    const user = await User.findById(req.user._id)
+      .populate({
+        path: 'enrolledCourses.course',
+        select: 'title description thumbnail price rating',
+        match: { isDeleted: false }
+      });
 
     if (!user) {
-      return next(new AppError('User not found', 404))
+      return next(new AppError('User not found', 404));
     }
 
+    // Filter out null/undefined courses
+    const validEnrollments = user.enrolledCourses.filter(e => e.course);
+
     const enrolledCourses = await Promise.all(
-      user.enrolledCourses.map(async (enrollment) => {
+      validEnrollments.map(async (enrollment) => {
         const progress = await Progress.findOne({
           user: req.user._id,
-          course: enrollment.course._id,
-        })
+          course: enrollment.course._id
+        });
 
         return {
           course: enrollment.course,
           enrolledAt: enrollment.enrolledAt,
-          progress: progress
-            ? {
-                completedLessons: progress.completedLessons.length,
-                completedQuizzes: progress.completedQuizzes.length,
-                lastAccessed: progress.lastAccessed,
-              }
-            : null,
-        }
+          progress: progress ? {
+            completedLessons: progress.completedLessons?.length || 0,
+            completedQuizzes: progress.completedQuizzes?.length || 0, 
+            lastAccessed: progress.lastAccessed
+          } : null
+        };
       })
-    )
+    );
 
     res.status(200).json({
       message: 'Enrolled courses fetched successfully',
-      data: enrolledCourses,
-    })
+      data: enrolledCourses 
+    });
+
   } catch (error) {
-    next(error)
+    console.error('getEnrolledCourses error:', error);
+    next(error);
   }
-}
+};
 
 exports.getCourseProgress = async (req, res, next) => {
   try {
