@@ -591,6 +591,7 @@ exports.getCourse = async (req, res, next) => {
       _id: course._id,
       title: course.title || '',
       description: course.description || '',
+      longDescription: course.longDescription || '',
       category: course.category || '',
       price: course.price || 0,
       modulePrice: course.modulePrice || 0,
