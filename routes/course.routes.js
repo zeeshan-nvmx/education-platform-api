@@ -64,7 +64,7 @@ router.get('/featured', optionalAuth, getFeaturedCourses)
 router.get('/public', optionalAuth, getPublicCoursesList)
 router.get('/category/:category', optionalAuth, getCoursesByCategory)
 router.get('/', optionalAuth, getAllCourses)
-router.get('/:courseId', validateMongoId, optionalAuth, getCourse)
+router.get('/:courseId', optionalAuth, getCourse)
 
 // Protected routes - require authentication
 router.get('/:courseId/progress', protect, validateMongoId, getCourseProgress)

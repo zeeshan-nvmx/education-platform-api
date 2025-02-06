@@ -375,6 +375,83 @@ exports.getPublicCoursesList = async (req, res, next) => {
 //   }
 // }
 
+// exports.getAllCourses = async (req, res, next) => {
+//   try {
+//     const { error, value } = querySchema.validate(req.query)
+//     if (error) {
+//       return next(new AppError(error.details[0].message, 400))
+//     }
+
+//     const { page = 1, limit = 10, category, search, minPrice, maxPrice, sortBy = 'createdAt', order = 'desc' } = value
+
+//     // Build query with explicit isDeleted check
+//     const query = { isDeleted: false }
+
+//     if (category) {
+//       query.category = category
+//     }
+
+//     if (search) {
+//       query.$text = { $search: search }
+//     }
+
+//     if (!isNaN(minPrice) || !isNaN(maxPrice)) {
+//       query.price = {}
+//       if (!isNaN(minPrice)) query.price.$gte = minPrice
+//       if (!isNaN(maxPrice)) query.price.$lte = maxPrice
+//     }
+
+//     // Ensure valid page and limit values
+//     const validPage = Math.max(1, parseInt(page))
+//     const validLimit = Math.min(100, Math.max(1, parseInt(limit)))
+//     const skip = (validPage - 1) * validLimit
+
+//     // Ensure valid sort field
+//     const allowedSortFields = ['createdAt', 'price', 'rating', 'totalStudents']
+//     const validSortBy = allowedSortFields.includes(sortBy) ? sortBy : 'createdAt'
+//     const sortDirection = order === 'asc' ? 1 : -1
+//     const sortOptions = { [validSortBy]: sortDirection }
+
+//     try {
+//       // Use Promise.all for parallel execution
+//       const [totalCourses, courses] = await Promise.all([
+//         Course.countDocuments(query),
+//         Course.find(query).select('-__v -isDeleted').populate('creator', 'firstName lastName email').sort(sortOptions).skip(skip).limit(validLimit).lean().exec(),
+//       ])
+
+//       // Calculate pagination values
+//       const totalPages = Math.ceil(totalCourses / validLimit)
+
+//       // Format the response
+//       res.status(200).json({
+//         message: 'Courses fetched successfully',
+//         data: {
+//           courses: courses.map((course) => ({
+//             ...course,
+//             creator: {
+//               name: `${course.creator?.firstName || ''} ${course.creator?.lastName || ''}`.trim(),
+//               email: course.creator?.email,
+//             },
+//           })),
+//           pagination: {
+//             currentPage: validPage,
+//             totalPages,
+//             totalCourses,
+//             hasNextPage: validPage < totalPages,
+//             hasPrevPage: validPage > 1,
+//           },
+//         },
+//       })
+//     } catch (dbError) {
+//       console.error('Database operation failed:', dbError)
+//       return next(new AppError('Failed to fetch courses', 500))
+//     }
+//   } catch (error) {
+//     console.error('getAllCourses error:', error)
+//     next(error)
+//   }
+// }
+
 exports.getAllCourses = async (req, res, next) => {
   try {
     const { error, value } = querySchema.validate(req.query)
@@ -384,7 +461,6 @@ exports.getAllCourses = async (req, res, next) => {
 
     const { page = 1, limit = 10, category, search, minPrice, maxPrice, sortBy = 'createdAt', order = 'desc' } = value
 
-    // Build query with explicit isDeleted check
     const query = { isDeleted: false }
 
     if (category) {
@@ -392,37 +468,33 @@ exports.getAllCourses = async (req, res, next) => {
     }
 
     if (search) {
-      query.$text = { $search: search }
+      const searchRegex = new RegExp(search, 'i')
+      query.$or = [{ title: searchRegex }, { description: searchRegex }]
     }
 
     if (!isNaN(minPrice) || !isNaN(maxPrice)) {
       query.price = {}
-      if (!isNaN(minPrice)) query.price.$gte = minPrice
-      if (!isNaN(maxPrice)) query.price.$lte = maxPrice
+      if (!isNaN(minPrice)) query.price.$gte = parseFloat(minPrice)
+      if (!isNaN(maxPrice)) query.price.$lte = parseFloat(maxPrice)
     }
 
-    // Ensure valid page and limit values
     const validPage = Math.max(1, parseInt(page))
     const validLimit = Math.min(100, Math.max(1, parseInt(limit)))
     const skip = (validPage - 1) * validLimit
 
-    // Ensure valid sort field
     const allowedSortFields = ['createdAt', 'price', 'rating', 'totalStudents']
     const validSortBy = allowedSortFields.includes(sortBy) ? sortBy : 'createdAt'
     const sortDirection = order === 'asc' ? 1 : -1
     const sortOptions = { [validSortBy]: sortDirection }
 
     try {
-      // Use Promise.all for parallel execution
       const [totalCourses, courses] = await Promise.all([
         Course.countDocuments(query),
         Course.find(query).select('-__v -isDeleted').populate('creator', 'firstName lastName email').sort(sortOptions).skip(skip).limit(validLimit).lean().exec(),
       ])
 
-      // Calculate pagination values
       const totalPages = Math.ceil(totalCourses / validLimit)
 
-      // Format the response
       res.status(200).json({
         message: 'Courses fetched successfully',
         data: {
@@ -454,19 +526,15 @@ exports.getAllCourses = async (req, res, next) => {
 
 exports.getCourse = async (req, res, next) => {
   try {
-    // Debug log to check user object
-    console.log('User from request:', req.user)
-
-    // First fetch the user with enrollments if authenticated
     let authenticatedUser = null
-    if (req.user && req.user._id) {
+    if (req.user?._id) {
       authenticatedUser = await User.findOne({ _id: req.user._id }, { enrolledCourses: 1, role: 1 }).lean()
-
-      console.log('Authenticated user found:', authenticatedUser)
     }
 
-    // Fetch course with modules and lessons
-    const course = await Course.findById(req.params.courseId)
+    const course = await Course.findOne({
+      _id: req.params.courseId,
+      isDeleted: false,
+    })
       .populate('creator', 'firstName lastName email')
       .populate({
         path: 'modules',
@@ -490,170 +558,195 @@ exports.getCourse = async (req, res, next) => {
       return next(new AppError('Course not found', 404))
     }
 
-    // Check user roles and enrollment
-    const isCreator = authenticatedUser && course.creator._id.toString() === authenticatedUser._id.toString()
-    const isAdmin = authenticatedUser && authenticatedUser.role === 'admin'
+    const isCreator = authenticatedUser && course.creator && course.creator._id.toString() === authenticatedUser._id.toString()
+    const isAdmin = authenticatedUser?.role === 'admin'
 
-    // Find enrollment if user is authenticated
     let enrollment = null
-    if (authenticatedUser) {
-      enrollment = authenticatedUser.enrolledCourses?.find((ec) => ec.course.toString() === course._id.toString())
-      console.log('Found enrollment:', enrollment)
+    if (authenticatedUser?.enrolledCourses?.length) {
+      enrollment = authenticatedUser.enrolledCourses.find((ec) => ec.course && ec.course.toString() === course._id.toString())
     }
 
-    // Prepare base course details
+    // Initialize base course details with safe defaults
     const courseDetails = {
       _id: course._id,
-      title: course.title,
-      description: course.description,
-      category: course.category,
-      price: course.price,
-      modulePrice: course.modulePrice,
-      thumbnail: course.thumbnail,
-      rating: course.rating,
-      totalStudents: course.totalStudents,
-      featured: course.featured,
-      creator: {
-        name: `${course.creator.firstName} ${course.creator.lastName}`,
-        email: isAdmin || isCreator ? course.creator.email : undefined,
-      },
-      instructors: course.instructors.map((instructor) => ({
-        name: instructor.name,
-        description: instructor.description,
-        designation: instructor.designation,
-        image: instructor.image,
-        expertise: instructor.expertise,
-        bio: instructor.bio,
-        socialLinks: instructor.socialLinks,
-      })),
+      title: course.title || '',
+      description: course.description || '',
+      category: course.category || '',
+      price: course.price || 0,
+      modulePrice: course.modulePrice || 0,
+      thumbnail: course.thumbnail || '',
+      rating: course.rating || 0,
+      totalStudents: course.totalStudents || 0,
+      featured: course.featured || false,
+      creator: course.creator
+        ? {
+            name: `${course.creator.firstName || ''} ${course.creator.lastName || ''}`.trim(),
+            email: isAdmin || isCreator ? course.creator.email : undefined,
+          }
+        : null,
+      instructors: Array.isArray(course.instructors)
+        ? course.instructors.map((instructor) => ({
+            name: instructor.name || '',
+            description: instructor.description || '',
+            designation: instructor.designation || '',
+            image: instructor.image || '',
+            expertise: Array.isArray(instructor.expertise) ? instructor.expertise : [],
+            bio: instructor.bio || '',
+            socialLinks: instructor.socialLinks || {},
+          }))
+        : [],
     }
 
-    // Get progress information for enrolled user
     let moduleProgress = {}
-    if (enrollment) {
+    if (enrollment && authenticatedUser?._id) {
       const progress = await Progress.find({
         user: authenticatedUser._id,
         course: course._id,
       }).lean()
 
       moduleProgress = progress.reduce((acc, p) => {
-        acc[p.module.toString()] = p
+        if (p && p.module) {
+          acc[p.module.toString()] = p
+        }
         return acc
       }, {})
-
-      console.log('Module progress:', moduleProgress)
     }
 
-    // Check access levels
     const hasFullAccess = isCreator || isAdmin || (enrollment && enrollment.enrollmentType === 'full')
 
-    courseDetails.modules = course.modules.map((module) => {
-      const moduleId = module._id.toString()
-      const hasModuleAccess = hasFullAccess || (enrollment && enrollment.enrolledModules?.some((em) => em.module.toString() === moduleId))
+    // Ensure course.modules is an array
+    const modules = Array.isArray(course.modules) ? course.modules : []
 
-      console.log(`Module ${moduleId} access:`, hasModuleAccess)
+    courseDetails.modules = modules
+      .map((module) => {
+        if (!module) return null
 
-      const moduleData = {
-        _id: module._id,
-        title: module.title,
-        description: module.description,
-        order: module.order,
-        totalLessons: module.lessons?.length || 0,
-      }
+        const moduleId = module._id.toString()
+        const hasModuleAccess =
+          hasFullAccess ||
+          (enrollment && Array.isArray(enrollment.enrolledModules) && enrollment.enrolledModules.some((em) => em && em.module && em.module.toString() === moduleId))
 
-      if (hasModuleAccess) {
-        moduleData.isAccessible = module.isAccessible
-        moduleData.prerequisites = module.prerequisites
-
-        const currentProgress = moduleProgress[moduleId]
-        if (currentProgress) {
-          moduleData.progress = {
-            completedLessons: currentProgress.completedLessons.length,
-            completedQuizzes: currentProgress.completedQuizzes.length,
-            progress: currentProgress.progress,
-            lastAccessed: currentProgress.lastAccessed,
-          }
+        const moduleData = {
+          _id: module._id,
+          title: module.title || '',
+          description: module.description || '',
+          order: module.order || 0,
+          totalLessons: Array.isArray(module.lessons) ? module.lessons.length : 0,
         }
 
-        moduleData.lessons = module.lessons.map((lesson) => {
-          const lessonData = {
-            _id: lesson._id,
-            title: lesson.title,
-            description: lesson.description,
-            order: lesson.order,
-            duration: lesson.duration,
-            requireQuizPass: lesson.requireQuizPass,
-            hasVideo: !!lesson.videoUrl,
-            totalAssets: lesson.assets?.length || 0,
-            completionRequirements: {
-              watchVideo: lesson.completionRequirements?.watchVideo || false,
-              hasRequiredAssets: lesson.completionRequirements?.downloadAssets?.some((asset) => asset.required) || false,
-              minimumTimeSpent: lesson.completionRequirements?.minimumTimeSpent || 0,
-            },
-          }
+        if (hasModuleAccess) {
+          moduleData.isAccessible = !!module.isAccessible
+          moduleData.prerequisites = Array.isArray(module.prerequisites) ? module.prerequisites : []
 
-          if (lesson.quiz) {
-            lessonData.quiz = {
-              title: lesson.quiz.title,
-              type: lesson.quiz.type,
-              passingScore: lesson.quiz.passingScore,
-              duration: lesson.quiz.duration,
-              maxAttempts: lesson.quiz.maxAttempts,
-              settings: {
-                required: lesson.quizSettings?.required || false,
-                minimumPassingScore: lesson.quizSettings?.minimumPassingScore || 70,
-                blockProgress: lesson.quizSettings?.blockProgress || false,
-                showQuizAt: lesson.quizSettings?.showQuizAt || 'after',
-                minimumTimeRequired: lesson.quizSettings?.minimumTimeRequired || 0,
-              },
-            }
-          }
-
+          const currentProgress = moduleProgress[moduleId]
           if (currentProgress) {
-            lessonData.progress = {
-              completed: currentProgress.completedLessons.includes(lesson._id),
-              quizCompleted: lesson.quiz ? currentProgress.completedQuizzes.includes(lesson.quiz._id) : null,
+            moduleData.progress = {
+              completedLessons: Array.isArray(currentProgress.completedLessons) ? currentProgress.completedLessons.length : 0,
+              completedQuizzes: Array.isArray(currentProgress.completedQuizzes) ? currentProgress.completedQuizzes.length : 0,
+              progress: currentProgress.progress || 0,
+              lastAccessed: currentProgress.lastAccessed || null,
             }
           }
 
-          return lessonData
-        })
-      } else {
-        // Limited lesson information for non-enrolled users
-        moduleData.lessons = module.lessons.map((lesson) => ({
-          _id: lesson._id,
-          title: lesson.title,
-          description: lesson.description,
-          order: lesson.order,
-          duration: lesson.duration,
-          hasQuiz: !!lesson.quiz,
-          hasVideo: !!lesson.videoUrl,
-          totalAssets: lesson.assets?.length || 0,
-        }))
-      }
+          const lessons = Array.isArray(module.lessons) ? module.lessons : []
+          moduleData.lessons = lessons
+            .map((lesson) => {
+              if (!lesson) return null
 
-      return moduleData
-    })
+              const lessonData = {
+                _id: lesson._id,
+                title: lesson.title || '',
+                description: lesson.description || '',
+                order: lesson.order || 0,
+                duration: lesson.duration || 0,
+                requireQuizPass: !!lesson.requireQuizPass,
+                hasVideo: !!lesson.videoUrl,
+                totalAssets: Array.isArray(lesson.assets) ? lesson.assets.length : 0,
+                completionRequirements: {
+                  watchVideo: !!lesson.completionRequirements?.watchVideo,
+                  hasRequiredAssets:
+                    Array.isArray(lesson.completionRequirements?.downloadAssets) && lesson.completionRequirements.downloadAssets.some((asset) => asset && asset.required),
+                  minimumTimeSpent: lesson.completionRequirements?.minimumTimeSpent || 0,
+                },
+              }
 
-    // Add enrollment information if enrolled
+              if (lesson.quiz) {
+                lessonData.quiz = {
+                  title: lesson.quiz.title || '',
+                  type: lesson.quiz.type || '',
+                  passingScore: lesson.quiz.passingScore || 0,
+                  duration: lesson.quiz.duration || 0,
+                  maxAttempts: lesson.quiz.maxAttempts || 0,
+                  settings: {
+                    required: !!lesson.quizSettings?.required,
+                    minimumPassingScore: lesson.quizSettings?.minimumPassingScore || 70,
+                    blockProgress: !!lesson.quizSettings?.blockProgress,
+                    showQuizAt: lesson.quizSettings?.showQuizAt || 'after',
+                    minimumTimeRequired: lesson.quizSettings?.minimumTimeRequired || 0,
+                  },
+                }
+              }
+
+              if (currentProgress) {
+                lessonData.progress = {
+                  completed: Array.isArray(currentProgress.completedLessons) && currentProgress.completedLessons.includes(lesson._id),
+                  quizCompleted: lesson.quiz && Array.isArray(currentProgress.completedQuizzes) && currentProgress.completedQuizzes.includes(lesson.quiz._id),
+                }
+              }
+
+              return lessonData
+            })
+            .filter(Boolean) // Remove null lessons
+        } else {
+          const lessons = Array.isArray(module.lessons) ? module.lessons : []
+          moduleData.lessons = lessons
+            .map((lesson) => {
+              if (!lesson) return null
+              return {
+                _id: lesson._id,
+                title: lesson.title || '',
+                description: lesson.description || '',
+                order: lesson.order || 0,
+                duration: lesson.duration || 0,
+                hasQuiz: !!lesson.quiz,
+                hasVideo: !!lesson.videoUrl,
+                totalAssets: Array.isArray(lesson.assets) ? lesson.assets.length : 0,
+              }
+            })
+            .filter(Boolean) // Remove null lessons
+        }
+
+        return moduleData
+      })
+      .filter(Boolean) // Remove null modules
+
     if (enrollment) {
       courseDetails.enrollment = {
-        type: enrollment.enrollmentType,
-        enrolledAt: enrollment.enrolledAt,
-        enrolledModules: enrollment.enrolledModules?.map((em) => ({
-          moduleId: em.module.toString(),
-          enrolledAt: em.enrolledAt,
-          lastAccessed: em.lastAccessed,
-        })),
+        type: enrollment.enrollmentType || 'module',
+        enrolledAt: enrollment.enrolledAt || new Date(),
+        enrolledModules: Array.isArray(enrollment.enrolledModules)
+          ? enrollment.enrolledModules
+              .map((em) => ({
+                moduleId: em?.module?.toString() || '',
+                enrolledAt: em?.enrolledAt || new Date(),
+                lastAccessed: em?.lastAccessed || new Date(),
+              }))
+              .filter((em) => em.moduleId)
+          : [],
       }
     }
 
-    // Add course statistics
     courseDetails.statistics = {
-      totalModules: course.modules.length,
-      totalLessons: course.modules.reduce((acc, module) => acc + (module.lessons?.length || 0), 0),
-      totalDuration: course.modules.reduce((acc, module) => acc + module.lessons.reduce((sum, lesson) => sum + (lesson.duration || 0), 0), 0),
-      totalQuizzes: course.modules.reduce((acc, module) => acc + module.lessons.reduce((sum, lesson) => sum + (lesson.quiz ? 1 : 0), 0), 0),
+      totalModules: courseDetails.modules.length,
+      totalLessons: courseDetails.modules.reduce((acc, module) => acc + (Array.isArray(module.lessons) ? module.lessons.length : 0), 0),
+      totalDuration: courseDetails.modules.reduce(
+        (acc, module) => acc + (Array.isArray(module.lessons) ? module.lessons.reduce((sum, lesson) => sum + (lesson?.duration || 0), 0) : 0),
+        0
+      ),
+      totalQuizzes: courseDetails.modules.reduce(
+        (acc, module) => acc + (Array.isArray(module.lessons) ? module.lessons.reduce((sum, lesson) => sum + (lesson?.quiz ? 1 : 0), 0) : 0),
+        0
+      ),
     }
 
     res.status(200).json({
@@ -665,6 +758,7 @@ exports.getCourse = async (req, res, next) => {
     next(error)
   }
 }
+
 
 exports.updateCourse = async (req, res, next) => {
   let newUploadedImageKeys = []
