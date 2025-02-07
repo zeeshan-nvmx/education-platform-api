@@ -1,5 +1,3 @@
-
-
 const { verifyToken } = require('../utils/token')
 const { User } = require('../models')
 const { AppError } = require('../utils/errors')

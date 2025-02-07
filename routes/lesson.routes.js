@@ -24,8 +24,9 @@ const parseFormDataJSON = require('../middleware/parseFormData')
 const router = express.Router({ mergeParams: true })
 
 // Basic lesson routes
-router.get('/', protect, validateMongoId, getLessons)
 router.get('/:lessonId', protect, validateMongoId, getLesson)
+router.get('/', protect, getLessons)
+
 
 // Lesson creation/management (Admin/SubAdmin only)
 router.post('/', protect, restrictTo('admin', 'subAdmin'), uploadAsset.array('assets', 10), parseFormDataJSON, createLesson)
