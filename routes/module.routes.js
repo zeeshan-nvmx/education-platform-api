@@ -24,7 +24,7 @@ const router = express.Router({ mergeParams: true })
 // Routes for enrolled students - require authentication only
 router.get('/', protect, validateMongoId, getModules)
 router.get('/:moduleId', protect, validateMongoId, getModule)
-router.get('/:moduleId/lessons', protect, validateMongoId, getModuleLessons)
+// router.get('/:moduleId/lessons', protect, validateMongoId, getModuleLessons)
 router.get('/:moduleId/enrollment-status', protect, validateMongoId, getModuleEnrollmentStatus)
 
 // Routes requiring admin rights
@@ -39,7 +39,7 @@ router.put('/reorder', protect, restrictTo('admin', 'subAdmin'), /* checkCourseO
 
 router.put('/:moduleId/prerequisites', protect, restrictTo('admin', 'subAdmin'), /* checkCourseOwnership, */ validateMongoId, updateModulePrerequisites)
 
-// Forward lesson routes
-router.use('/:moduleId/lesson', lessonRouter)
+// // Forward lesson routes
+// router.use('/:moduleId/lessons', lessonRouter)
 
 module.exports = router

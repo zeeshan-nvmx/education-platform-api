@@ -588,16 +588,16 @@ exports.getLessons = async (req, res, next) => {
   try {
     console.log('getLessons')
     const { courseId, moduleId } = req.params
-    const userId = req.user._id // 'protect' middleware ensures req.user exists
+    const userId = req.user._id 
 
-    // 1. Fetch the user (we need role and enrollment info).
-    const user = await User.findById(userId).select('+role +enrolledCourses').lean() // Use lean()
+    
+    const user = await User.findById(userId).select('+role +enrolledCourses').lean() 
 
     if (!user) {
-      return next(new AppError('User not found', 404)) // Unlikely, but good practice
+      return next(new AppError('User not found', 404)) 
     }
 
-    // 2. Check for Admin Access FIRST.
+    
     const isAdmin = ['admin', 'subAdmin', 'moderator'].includes(user.role)
     if (isAdmin) {
       // Admins have access to everything.  Fetch lessons and return.
@@ -636,7 +636,7 @@ exports.getLessons = async (req, res, next) => {
       return next(new AppError('You do not have access to this module', 403))
     }
 
-    // 5. Fetch lessons (we know user has access).
+    // 5. Fetch lessons
     const lessons = await Lesson.find({
       module: moduleId,
       isDeleted: false,
@@ -651,13 +651,13 @@ exports.getLessons = async (req, res, next) => {
       ])
       .lean()
 
-    // 6. Get progress (only if NOT admin - admins get all lessons without progress).
+    //  Get progress 
     const progress = await Progress.findOne({
       user: userId,
       module: moduleId,
-    }).lean() // Use lean()
+    }).lean() 
 
-    // 7. Add progress information to lessons.
+    // Add progress information to lessons.
     const lessonsWithProgress = lessons.map((lesson) => {
       const lessonObj = { ...lesson }
 
@@ -674,7 +674,7 @@ exports.getLessons = async (req, res, next) => {
           _id: asset._id,
           title: asset.title,
           description: asset.description,
-          fileUrl: asset.fileUrl, // Consider making this null initially
+          fileUrl: asset.fileUrl, 
           fileType: asset.fileType,
           fileSize: asset.fileSize,
           downloadCount: asset.downloadCount,
@@ -688,24 +688,180 @@ exports.getLessons = async (req, res, next) => {
     res.status(200).json({
       status: 'success',
       message: 'Lessons retrieved successfully',
-      data: lessonsWithProgress, // Return either lessons or lessonsWithProgress
+      data: lessonsWithProgress,
     })
   } catch (error) {
     next(error)
   }
 }
 
+// exports.getLesson = async (req, res, next) => {
+//   try {
+//     const { courseId, moduleId, lessonId } = req.params
+//     const userId = req.user._id
+
+//     const user = await User.findById(userId)
+//     if (!user) {
+//       return next(new AppError('User not found', 404))
+//     }
+
+//     // Check if user is admin/subAdmin/moderator
+//     const isAdmin = ['admin', 'subAdmin', 'moderator'].includes(user.role)
+
+//     // If not admin, check enrollment
+//     if (!isAdmin) {
+//       const enrolledCourse = user.enrolledCourses?.find((ec) => ec.course.toString() === courseId)
+
+//       if (!enrolledCourse) {
+//         return next(new AppError('You do not have access to this course', 403))
+//       }
+
+//       const hasAccess = enrolledCourse.enrollmentType === 'full' || enrolledCourse.enrolledModules.some((em) => em.module.toString() === moduleId)
+
+//       if (!hasAccess) {
+//         return next(new AppError('You do not have access to this module', 403))
+//       }
+//     }
+
+//     const lesson = await Lesson.findOne({
+//       _id: lessonId,
+//       module: moduleId,
+//       isDeleted: false,
+//     }).populate('quiz')
+
+//     if (!lesson) {
+//       return next(new AppError('Lesson not found', 404))
+//     }
+
+//     // Generate presigned URLs for assets
+//     const assetsWithUrls = await Promise.all(
+//       lesson.assets?.map(async (asset) => {
+//         const downloadUrl = await generatePresignedUrl(asset.fileKey, 3600)
+//         return {
+//           _id: asset._id,
+//           title: asset.title,
+//           description: asset.description,
+//           fileUrl: asset.fileUrl,
+//           fileType: asset.fileType,
+//           fileSize: asset.fileSize,
+//           downloadCount: asset.downloadCount,
+//           uploadedAt: asset.uploadedAt,
+//           downloadUrl,
+//         }
+//       }) || []
+//     )
+
+//     // Base response data for both admin and regular users
+//     const responseData = {
+//       _id: lesson._id,
+//       title: lesson.title,
+//       description: lesson.description,
+//       details: lesson.details,
+//       module: lesson.module,
+//       order: lesson.order,
+//       videoUrl: lesson.videoUrl,
+//       dashUrl: lesson.dashUrl,
+//       rawUrl: lesson.rawUrl,
+//       cloudflareVideoId: lesson.cloudflareVideoId,
+//       duration: lesson.duration,
+//       thumbnail: lesson.thumbnail,
+//       videoMeta: lesson.videoMeta,
+//       assets: assetsWithUrls,
+//       quizSettings: lesson.quizSettings,
+//       completionRequirements: lesson.completionRequirements,
+//     }
+
+//     // Add progress info only for non-admin users
+//     if (!isAdmin) {
+//       const [progress, timeProgress, videoProgress, assetProgress] = await Promise.all([
+//         Progress.findOne({
+//           user: userId,
+//           module: moduleId,
+//         }),
+//         LessonProgress.findOne({
+//           user: userId,
+//           lesson: lessonId,
+//         }),
+//         lesson.videoUrl
+//           ? VideoProgress.findOne({
+//               user: userId,
+//               lesson: lessonId,
+//             })
+//           : Promise.resolve(null),
+//         lesson.assets?.length > 0
+//           ? AssetProgress.find({
+//               user: userId,
+//               lesson: lessonId,
+//             })
+//           : Promise.resolve([]),
+//       ])
+
+//       responseData.progress = {
+//         completed: progress?.completedLessons.includes(lessonId) || false,
+//         timeSpent: timeProgress?.timeSpent || 0,
+//         videoProgress: videoProgress
+//           ? {
+//               completed: videoProgress.completed,
+//               watchedTime: videoProgress.watchedTime,
+//               lastPosition: videoProgress.lastPosition,
+//             }
+//           : null,
+//         assetDownloads: assetProgress.reduce((acc, ap) => {
+//           acc[ap.asset.toString()] = {
+//             downloadCount: ap.downloadCount,
+//             firstDownloaded: ap.firstDownloaded,
+//             lastDownloaded: ap.lastDownloaded,
+//           }
+//           return acc
+//         }, {}),
+//       }
+
+//       if (lesson.quiz) {
+//         const [canTakeQuiz, quizAttempts] = await Promise.all([
+//           checkQuizRequirements(userId, lessonId),
+//           QuizAttempt.find({
+//             quiz: lesson.quiz._id,
+//             user: userId,
+//           }).sort('-submittedAt'),
+//         ])
+
+//         responseData.progress.quiz = {
+//           completed: progress?.completedQuizzes.includes(lesson.quiz._id) || false,
+//           attempts: quizAttempts.map((attempt) => ({
+//             id: attempt._id,
+//             score: attempt.score,
+//             percentage: attempt.percentage,
+//             passed: attempt.passed,
+//             status: attempt.status,
+//             submittedAt: attempt.submittedAt,
+//           })),
+//           canTake: canTakeQuiz,
+//           remainingAttempts: lesson.quiz.maxAttempts - quizAttempts.length,
+//         }
+//       }
+//     }
+
+//     res.status(200).json({
+//       status: 'success',
+//       message: 'Lesson retrieved successfully',
+//       data: responseData,
+//     })
+//   } catch (error) {
+//     next(error)
+//   }
+// }
+
 exports.getLesson = async (req, res, next) => {
   try {
     const { courseId, moduleId, lessonId } = req.params
     const userId = req.user._id
 
-    const user = await User.findById(userId)
+    const user = await User.findById(userId).select('+role +enrolledCourses').lean() // Add .lean()
     if (!user) {
       return next(new AppError('User not found', 404))
     }
 
-    // Check if user is admin/subAdmin/moderator
+    // Check if user is admin/subAdmin/moderator FIRST
     const isAdmin = ['admin', 'subAdmin', 'moderator'].includes(user.role)
 
     // If not admin, check enrollment
@@ -727,31 +883,15 @@ exports.getLesson = async (req, res, next) => {
       _id: lessonId,
       module: moduleId,
       isDeleted: false,
-    }).populate('quiz')
+    })
+      .populate('quiz')
+      .lean() // Use lean()
 
     if (!lesson) {
       return next(new AppError('Lesson not found', 404))
     }
 
-    // Generate presigned URLs for assets
-    const assetsWithUrls = await Promise.all(
-      lesson.assets?.map(async (asset) => {
-        const downloadUrl = await generatePresignedUrl(asset.fileKey, 3600)
-        return {
-          _id: asset._id,
-          title: asset.title,
-          description: asset.description,
-          fileUrl: asset.fileUrl,
-          fileType: asset.fileType,
-          fileSize: asset.fileSize,
-          downloadCount: asset.downloadCount,
-          uploadedAt: asset.uploadedAt,
-          downloadUrl,
-        }
-      }) || []
-    )
-
-    // Base response data for both admin and regular users
+    // Base response data for BOTH admin and regular users
     const responseData = {
       _id: lesson._id,
       title: lesson.title,
@@ -766,33 +906,44 @@ exports.getLesson = async (req, res, next) => {
       duration: lesson.duration,
       thumbnail: lesson.thumbnail,
       videoMeta: lesson.videoMeta,
-      assets: assetsWithUrls,
+      assets: lesson.assets?.map((asset) => ({
+        // Simplified asset handling
+        _id: asset._id,
+        title: asset.title,
+        description: asset.description,
+        fileUrl: asset.fileUrl, // Return the S3 URL directly.
+        fileType: asset.fileType,
+        fileSize: asset.fileSize,
+        downloadCount: asset.downloadCount,
+        uploadedAt: asset.uploadedAt,
+        // NO downloadUrl here
+      })),
       quizSettings: lesson.quizSettings,
       completionRequirements: lesson.completionRequirements,
     }
 
-    // Add progress info only for non-admin users
+    // Add progress info ONLY for non-admin users
     if (!isAdmin) {
       const [progress, timeProgress, videoProgress, assetProgress] = await Promise.all([
         Progress.findOne({
           user: userId,
           module: moduleId,
-        }),
+        }).lean(), // Use lean()
         LessonProgress.findOne({
           user: userId,
           lesson: lessonId,
-        }),
+        }).lean(), // Use lean()
         lesson.videoUrl
           ? VideoProgress.findOne({
               user: userId,
               lesson: lessonId,
-            })
+            }).lean() // Use lean()
           : Promise.resolve(null),
         lesson.assets?.length > 0
           ? AssetProgress.find({
               user: userId,
               lesson: lessonId,
-            })
+            }).lean() // Use lean()
           : Promise.resolve([]),
       ])
 
@@ -822,7 +973,9 @@ exports.getLesson = async (req, res, next) => {
           QuizAttempt.find({
             quiz: lesson.quiz._id,
             user: userId,
-          }).sort('-submittedAt'),
+          })
+            .sort('-submittedAt')
+            .lean(), // Use lean()
         ])
 
         responseData.progress.quiz = {
