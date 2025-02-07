@@ -7,7 +7,7 @@ const sanitizeHtml = require('sanitize-html')
 
 const instructorSchema = Joi.object({
   name: Joi.string().required().trim(),
-  description: Joi.string().required().trim(),
+  description: Joi.string().trim(),
   designation: Joi.string().trim(),
   expertise: Joi.array().items(Joi.string().trim()),
   socialLinks: Joi.object({
@@ -40,8 +40,6 @@ const querySchema = Joi.object({
   sortBy: Joi.string().valid('createdAt', 'price', 'rating', 'totalStudents'),
   order: Joi.string().valid('asc', 'desc'),
 })
-
-// --- (Helper Functions - handleInstructorImages, cleanupInstructorImages) ---
 
 async function handleInstructorImages(instructors, instructorImages) {
   const processedInstructors = await Promise.all(
