@@ -1,0 +1,16 @@
+{
+  "title": "Updated JavaScript Course 2024",
+  "description": "Updated course description",
+  "price": 30.99,
+  "instructors": [
+    {
+      "name": "Jane Smith",
+      "description": "JavaScript Expert",
+      "designation": "Senior Instructor",
+      "expertise": ["JavaScript", "TypeScript"],
+      "socialLinks": { "linkedin": "https://linkedin.com/in/janesmith" },
+      "bio": "15+ years in software engineering",
+      "achievements": ["Tech lead at major company"]
+    }
+  ]
+}

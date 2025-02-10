@@ -23,6 +23,7 @@ class CloudflareService {
             'localhost:3000', // Local development without protocol
             'localhost:5173', // Vite default port
             'localhost',
+            'esgeducation.netlify.app',
             ' ',
           ],
           requireSignedURLs: false,

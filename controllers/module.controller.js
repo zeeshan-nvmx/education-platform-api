@@ -235,7 +235,6 @@ exports.createModule = async (req, res, next) => {
 }
 
 // Get All Modules
-
 exports.getModules = async (req, res, next) => {
   try {
     if (!req.user?._id) {
@@ -325,7 +324,6 @@ exports.getModules = async (req, res, next) => {
 
 
 // Get Single Module
-
 exports.getModule = async (req, res, next) => {
   try {
     const module = await Module.findOne({
