@@ -190,16 +190,6 @@ const courseSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
-    modulePrice: {
-      type: Number,
-      required: true,
-      validate: {
-        validator: function (value) {
-          return value <= this.price
-        },
-        message: 'Module price cannot be greater than course price',
-      },
-    },
     creator: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -279,6 +269,11 @@ const moduleSchema = new mongoose.Schema(
       type: Number,
       required: true,
       index: true,
+    },
+    price: {
+      type: Number,
+      required: true,
+      default: 0,
     },
     prerequisites: [
       {

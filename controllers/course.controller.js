@@ -25,7 +25,6 @@ const courseSchema = Joi.object({
   longDescription: Joi.string().trim(),
   category: Joi.string().trim(),
   price: Joi.number().min(0),
-  modulePrice: Joi.number().min(0),
   featured: Joi.boolean(),
   instructors: Joi.array().min(1).items(instructorSchema),
 }).options({ abortEarly: false })
@@ -61,6 +60,69 @@ async function cleanupInstructorImages(imageKeys) {
 }
 
 
+// exports.createCourse = async (req, res, next) => {
+//   let uploadedImageKeys = []
+
+//   try {
+//     const courseData = JSON.parse(req.body.courseData)
+//     const { error, value } = courseSchema.validate(courseData)
+
+//     if (error) {
+//       return res.status(400).json({
+//         status: 'error',
+//         errors: error.details.map((detail) => ({
+//           field: detail.context.key,
+//           message: detail.message,
+//         })),
+//       })
+//     }
+
+//     if (value.modulePrice > value.price) {
+//       return next(new AppError('Module price cannot be greater than course price', 400))
+//     }
+
+//     const existingCourse = await Course.findOne({ title: value.title })
+//     if (existingCourse) {
+//       return next(new AppError('A course with this title already exists', 400))
+//     }
+
+//     let thumbnailUrl = null
+//     let thumbnailKey = null
+//     if (req.files?.thumbnail?.[0]) {
+//       thumbnailKey = `course-thumbnails/${Date.now()}-${req.files.thumbnail[0].originalname}`
+//       thumbnailUrl = await uploadToS3(req.files.thumbnail[0], thumbnailKey)
+//       uploadedImageKeys.push(thumbnailKey)
+//     }
+
+//     const instructorsWithImages = await handleInstructorImages(value.instructors, req.files?.instructorImages)
+
+//     uploadedImageKeys = uploadedImageKeys.concat(instructorsWithImages.filter((inst) => inst.imageKey).map((inst) => inst.imageKey))
+
+//     value.description = sanitizeHtml(value.description, {
+//       allowedTags: ['b', 'i', 'em', 'strong', 'p', 'br'],
+//       allowedAttributes: {},
+//     })
+
+//     const course = await Course.create({
+//       ...value,
+//       thumbnail: thumbnailUrl,
+//       thumbnailKey,
+//       instructors: instructorsWithImages,
+//       creator: req.user._id,
+//     })
+
+//     const populatedCourse = await Course.findById(course._id).populate('creator', 'firstName lastName email')
+
+//     res.status(201).json({
+//       message: 'Course created successfully',
+//       data: populatedCourse,
+//     })
+//   } catch (error) {
+//     await cleanupInstructorImages(uploadedImageKeys)
+//     next(error)
+//   }
+// }
+
 exports.createCourse = async (req, res, next) => {
   let uploadedImageKeys = []
 
@@ -78,10 +140,6 @@ exports.createCourse = async (req, res, next) => {
       })
     }
 
-    if (value.modulePrice > value.price) {
-      return next(new AppError('Module price cannot be greater than course price', 400))
-    }
-
     const existingCourse = await Course.findOne({ title: value.title })
     if (existingCourse) {
       return next(new AppError('A course with this title already exists', 400))
@@ -96,7 +154,6 @@ exports.createCourse = async (req, res, next) => {
     }
 
     const instructorsWithImages = await handleInstructorImages(value.instructors, req.files?.instructorImages)
-
     uploadedImageKeys = uploadedImageKeys.concat(instructorsWithImages.filter((inst) => inst.imageKey).map((inst) => inst.imageKey))
 
     value.description = sanitizeHtml(value.description, {
@@ -139,10 +196,10 @@ exports.getPublicCoursesList = async (req, res, next) => {
 
     // Conditional population based on authentication
     let coursesQuery = Course.find(query)
-      .select('title description category thumbnail price modulePrice rating totalStudents featured createdAt creator modules')
+      .select('title description category thumbnail price rating totalStudents featured createdAt creator modules')
       .populate({
         path: 'modules',
-        select: 'title description order lessons',
+        select: 'title description order price lessons',
         match: {}, 
         populate: {
           path: 'lessons',
@@ -182,7 +239,6 @@ exports.getPublicCoursesList = async (req, res, next) => {
         category: course.category,
         thumbnail: course.thumbnail,
         price: course.price,
-        modulePrice: course.modulePrice,
         rating: course.rating,
         totalStudents: course.totalStudents,
         featured: course.featured,
@@ -193,6 +249,7 @@ exports.getPublicCoursesList = async (req, res, next) => {
           title: module.title,
           description: module.description,
           order: module.order,
+          price: module.price,
           totalLessons: module.lessons.length,
           lessons: module.lessons.map((lesson) => ({
             _id: lesson._id,
@@ -307,236 +364,6 @@ exports.getAllCourses = async (req, res, next) => {
   }
 }
 
-// exports.getCourse = async (req, res, next) => {
-//   try {
-//     let authenticatedUser = null
-//     if (req.user?._id) {
-//       authenticatedUser = await User.findOne({ _id: req.user._id }, { enrolledCourses: 1, role: 1 }).lean()
-//     }
-
-//     const course = await Course.findOne({
-//       _id: req.params.courseId,
-//       // No isDeleted check
-//     })
-//       .populate('creator', 'firstName lastName email')
-//       .populate({
-//         path: 'modules',
-//         select: 'title description order prerequisites isAccessible dependencies', // No isDeleted check
-//         options: { sort: { order: 1 } },
-//         populate: {
-//           path: 'lessons',
-//           select: 'title description order videoUrl duration requireQuizPass completionRequirements quizSettings assets', // No isDeleted check
-//           options: { sort: { order: 1 } },
-//           populate: {
-//             path: 'quiz',
-//             select: 'title type passingScore duration maxAttempts',
-//           },
-//         },
-//       })
-//       .lean()
-
-//     if (!course) {
-//       return next(new AppError('Course not found', 404))
-//     }
-
-//     const isCreator = authenticatedUser && course.creator && course.creator._id.toString() === authenticatedUser._id.toString()
-//     const isAdmin = authenticatedUser?.role === 'admin'
-
-//     let enrollment = null
-//     if (authenticatedUser?.enrolledCourses?.length) {
-//       enrollment = authenticatedUser.enrolledCourses.find((ec) => ec.course && ec.course.toString() === course._id.toString())
-//     }
-
-//     const courseDetails = {
-//       _id: course._id,
-//       title: course.title || '',
-//       description: course.description || '',
-//       category: course.category || '',
-//       price: course.price || 0,
-//       modulePrice: course.modulePrice || 0,
-//       thumbnail: course.thumbnail || '',
-//       rating: course.rating || 0,
-//       totalStudents: course.totalStudents || 0,
-//       featured: course.featured || false,
-//       creator: course.creator
-//         ? {
-//             name: `${course.creator.firstName || ''} ${course.creator.lastName || ''}`.trim(),
-//             email: isAdmin || isCreator ? course.creator.email : undefined,
-//           }
-//         : null,
-//       instructors: Array.isArray(course.instructors)
-//         ? course.instructors.map((instructor) => ({
-//             name: instructor.name || '',
-//             description: instructor.description || '',
-//             designation: instructor.designation || '',
-//             image: instructor.image || '',
-//             expertise: Array.isArray(instructor.expertise) ? instructor.expertise : [],
-//             bio: instructor.bio || '',
-//             socialLinks: instructor.socialLinks || {},
-//           }))
-//         : [],
-//     }
-
-//     let moduleProgress = {}
-//     if (enrollment && authenticatedUser?._id) {
-//       const progress = await Progress.find({
-//         user: authenticatedUser._id,
-//         course: course._id,
-//       }).lean()
-
-//       moduleProgress = progress.reduce((acc, p) => {
-//         if (p && p.module) {
-//           acc[p.module.toString()] = p
-//         }
-//         return acc
-//       }, {})
-//     }
-
-//     const hasFullAccess = isCreator || isAdmin || (enrollment && enrollment.enrollmentType === 'full')
-
-//     const modules = Array.isArray(course.modules) ? course.modules : []
-//     courseDetails.modules = modules
-//       .map((module) => {
-//         if (!module) return null
-
-//         const moduleId = module._id.toString()
-//         const hasModuleAccess =
-//           hasFullAccess ||
-//           (enrollment && Array.isArray(enrollment.enrolledModules) && enrollment.enrolledModules.some((em) => em && em.module && em.module.toString() === moduleId))
-
-//         const moduleData = {
-//           _id: module._id,
-//           title: module.title || '',
-//           description: module.description || '',
-//           order: module.order || 0,
-//           totalLessons: Array.isArray(module.lessons) ? module.lessons.length : 0,
-//         }
-
-//         if (hasModuleAccess) {
-//           moduleData.isAccessible = !!module.isAccessible
-//           moduleData.prerequisites = Array.isArray(module.prerequisites) ? module.prerequisites : []
-
-//           const currentProgress = moduleProgress[moduleId]
-//           if (currentProgress) {
-//             moduleData.progress = {
-//               completedLessons: Array.isArray(currentProgress.completedLessons) ? currentProgress.completedLessons.length : 0,
-//               completedQuizzes: Array.isArray(currentProgress.completedQuizzes) ? currentProgress.completedQuizzes.length : 0,
-//               progress: currentProgress.progress || 0,
-//               lastAccessed: currentProgress.lastAccessed || null,
-//             }
-//           }
-
-//           const lessons = Array.isArray(module.lessons) ? module.lessons : []
-//           moduleData.lessons = lessons
-//             .map((lesson) => {
-//               if (!lesson) return null
-
-//               const lessonData = {
-//                 _id: lesson._id,
-//                 title: lesson.title || '',
-//                 description: lesson.description || '',
-//                 order: lesson.order || 0,
-//                 duration: lesson.duration || 0,
-//                 requireQuizPass: !!lesson.requireQuizPass,
-//                 hasVideo: !!lesson.videoUrl,
-//                 totalAssets: Array.isArray(lesson.assets) ? lesson.assets.length : 0,
-//                 completionRequirements: {
-//                   watchVideo: !!lesson.completionRequirements?.watchVideo,
-//                   hasRequiredAssets:
-//                     Array.isArray(lesson.completionRequirements?.downloadAssets) && lesson.completionRequirements.downloadAssets.some((asset) => asset && asset.required),
-//                   minimumTimeSpent: lesson.completionRequirements?.minimumTimeSpent || 0,
-//                 },
-//               }
-
-//               if (lesson.quiz) {
-//                 lessonData.quiz = {
-//                   title: lesson.quiz.title || '',
-//                   type: lesson.quiz.type || '',
-//                   passingScore: lesson.quiz.passingScore || 0,
-//                   duration: lesson.quiz.duration || 0,
-//                   maxAttempts: lesson.quiz.maxAttempts || 0,
-//                   settings: {
-//                     required: !!lesson.quizSettings?.required,
-//                     minimumPassingScore: lesson.quizSettings?.minimumPassingScore || 70,
-//                     blockProgress: !!lesson.quizSettings?.blockProgress,
-//                     showQuizAt: lesson.quizSettings?.showQuizAt || 'after',
-//                     minimumTimeRequired: lesson.quizSettings?.minimumTimeRequired || 0,
-//                   },
-//                 }
-//               }
-
-//               if (currentProgress) {
-//                 lessonData.progress = {
-//                   completed: Array.isArray(currentProgress.completedLessons) && currentProgress.completedLessons.includes(lesson._id),
-//                   quizCompleted: lesson.quiz && Array.isArray(currentProgress.completedQuizzes) && currentProgress.completedQuizzes.includes(lesson.quiz._id),
-//                 }
-//               }
-
-//               return lessonData
-//             })
-//             .filter(Boolean)
-//         } else {
-//           const lessons = Array.isArray(module.lessons) ? module.lessons : []
-//           moduleData.lessons = lessons
-//             .map((lesson) => {
-//               if (!lesson) return null
-//               return {
-//                 _id: lesson._id,
-//                 title: lesson.title || '',
-//                 description: lesson.description || '',
-//                 order: lesson.order || 0,
-//                 duration: lesson.duration || 0,
-//                 hasQuiz: !!lesson.quiz,
-//                 hasVideo: !!lesson.videoUrl,
-//                 totalAssets: Array.isArray(lesson.assets) ? lesson.assets.length : 0,
-//               }
-//             })
-//             .filter(Boolean)
-//         }
-
-//         return moduleData
-//       })
-//       .filter(Boolean)
-
-//     if (enrollment) {
-//       courseDetails.enrollment = {
-//         type: enrollment.enrollmentType || 'module',
-//         enrolledAt: enrollment.enrolledAt || new Date(),
-//         enrolledModules: Array.isArray(enrollment.enrolledModules)
-//           ? enrollment.enrolledModules
-//               .map((em) => ({
-//                 moduleId: em?.module?.toString() || '',
-//                 enrolledAt: em?.enrolledAt || new Date(),
-//                 lastAccessed: em?.lastAccessed || new Date(),
-//               }))
-//               .filter((em) => em.moduleId)
-//           : [],
-//       }
-//     }
-
-//     courseDetails.statistics = {
-//       totalModules: courseDetails.modules.length,
-//       totalLessons: courseDetails.modules.reduce((acc, module) => acc + (Array.isArray(module.lessons) ? module.lessons.length : 0), 0),
-//       totalDuration: courseDetails.modules.reduce(
-//         (acc, module) => acc + (Array.isArray(module.lessons) ? module.lessons.reduce((sum, lesson) => sum + (lesson?.duration || 0), 0) : 0),
-//         0
-//       ),
-//       totalQuizzes: courseDetails.modules.reduce(
-//         (acc, module) => acc + (Array.isArray(module.lessons) ? module.lessons.reduce((sum, lesson) => sum + (lesson?.quiz ? 1 : 0), 0) : 0),
-//         0
-//       ),
-//     }
-
-//     res.status(200).json({
-//       message: 'Course fetched successfully',
-//       data: courseDetails,
-//     })
-//   } catch (error) {
-//     console.error('Error in getCourse:', error)
-//     next(error)
-//   }
-// }
-
 exports.getCourse = async (req, res, next) => {
   try {
     
@@ -546,7 +373,7 @@ exports.getCourse = async (req, res, next) => {
       .populate('creator', 'firstName lastName email')
       .populate({
         path: 'modules',
-        select: 'title description order prerequisites isAccessible dependencies',
+        select: 'title description order price prerequisites isAccessible dependencies',
         options: { sort: { order: 1 } },
         populate: {
           path: 'lessons',
@@ -592,7 +419,6 @@ exports.getCourse = async (req, res, next) => {
       longDescription: course.longDescription || '',
       category: course.category || '',
       price: course.price || 0,
-      modulePrice: course.modulePrice || 0,
       thumbnail: course.thumbnail || '',
       rating: course.rating || 0,
       totalStudents: course.totalStudents || 0,
@@ -648,6 +474,7 @@ exports.getCourse = async (req, res, next) => {
           title: module.title || '',
           description: module.description || '',
           order: module.order || 0,
+          price: module.price || 0,
           totalLessons: Array.isArray(module.lessons) ? module.lessons.length : 0,
         }
 
@@ -776,6 +603,91 @@ exports.getCourse = async (req, res, next) => {
   }
 }
 
+// exports.updateCourse = async (req, res, next) => {
+//   let newUploadedImageKeys = []
+
+//   try {
+//     const courseData = JSON.parse(req.body.courseData || '{}')
+//     const { error, value } = courseSchema.validate(courseData)
+
+//     if (error) {
+//       return res.status(400).json({
+//         status: 'error',
+//         errors: error.details.map((detail) => ({
+//           field: detail.context.key,
+//           message: detail.message,
+//         })),
+//       })
+//     }
+
+//     if (Object.keys(value).length === 0 && !req.files) {
+//       return next(new AppError('No update data provided', 400))
+//     }
+
+//     const course = await Course.findById(req.params.courseId)
+//     if (!course) {
+//       return next(new AppError('Course not found', 404))
+//     }
+
+//     if (value.modulePrice && value.modulePrice > (value.price || course.price)) {
+//       return next(new AppError('Module price cannot be greater than course price', 400))
+//     }
+
+//     if (req.files?.thumbnail?.[0]) {
+//       if (course.thumbnailKey) {
+//         await deleteFromS3(course.thumbnailKey).catch(console.error)
+//       }
+//       const thumbnailKey = `course-thumbnails/${Date.now()}-${req.files.thumbnail[0].originalname}`
+//       const thumbnailUrl = await uploadToS3(req.files.thumbnail[0], thumbnailKey)
+//       value.thumbnail = thumbnailUrl
+//       value.thumbnailKey = thumbnailKey
+//       newUploadedImageKeys.push(thumbnailKey)
+//     }
+
+//     if (value.instructors) {
+//       const oldInstructorImageKeys = course.instructors.filter((inst) => inst.imageKey).map((inst) => inst.imageKey)
+
+//       const instructorsWithImages = await handleInstructorImages(value.instructors, req.files?.instructorImages)
+
+//       newUploadedImageKeys = newUploadedImageKeys.concat(instructorsWithImages.filter((inst) => inst.imageKey).map((inst) => inst.imageKey))
+
+//       value.instructors = instructorsWithImages
+//       await cleanupInstructorImages(oldInstructorImageKeys)
+//     }
+
+//     if (value.description) {
+//       value.description = sanitizeHtml(value.description, {
+//         allowedTags: ['b', 'i', 'em', 'strong', 'p', 'br'],
+//         allowedAttributes: {},
+//       })
+//     }
+
+//     if (value.title && value.title !== course.title) {
+//       const existingCourse = await Course.findOne({
+//         title: value.title,
+//         _id: { $ne: req.params.courseId },
+//       })
+//       if (existingCourse) {
+//         await cleanupInstructorImages(newUploadedImageKeys)
+//         return next(new AppError('A course with this title already exists', 400))
+//       }
+//     }
+
+//     const updatedCourse = await Course.findByIdAndUpdate(req.params.courseId, { ...value }, { new: true, runValidators: true }).populate(
+//       'creator',
+//       'firstName lastName email'
+//     )
+
+//     res.status(200).json({
+//       message: 'Course updated successfully',
+//       data: updatedCourse,
+//     })
+//   } catch (error) {
+//     await cleanupInstructorImages(newUploadedImageKeys)
+//     next(error)
+//   }
+// }
+
 exports.updateCourse = async (req, res, next) => {
   let newUploadedImageKeys = []
 
@@ -802,10 +714,6 @@ exports.updateCourse = async (req, res, next) => {
       return next(new AppError('Course not found', 404))
     }
 
-    if (value.modulePrice && value.modulePrice > (value.price || course.price)) {
-      return next(new AppError('Module price cannot be greater than course price', 400))
-    }
-
     if (req.files?.thumbnail?.[0]) {
       if (course.thumbnailKey) {
         await deleteFromS3(course.thumbnailKey).catch(console.error)
@@ -821,7 +729,6 @@ exports.updateCourse = async (req, res, next) => {
       const oldInstructorImageKeys = course.instructors.filter((inst) => inst.imageKey).map((inst) => inst.imageKey)
 
       const instructorsWithImages = await handleInstructorImages(value.instructors, req.files?.instructorImages)
-
       newUploadedImageKeys = newUploadedImageKeys.concat(instructorsWithImages.filter((inst) => inst.imageKey).map((inst) => inst.imageKey))
 
       value.instructors = instructorsWithImages
@@ -976,7 +883,7 @@ exports.getCourseModules = async (req, res, next) => {
   try {
     const course = await Course.findById(req.params.courseId).populate({
       path: 'modules',
-      select: 'title description order prerequisites isAccessible dependencies', // No isDeleted
+      select: 'title description order price prerequisites isAccessible dependencies', // No isDeleted
       options: { sort: { order: 1 } },
     })
 

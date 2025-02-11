@@ -14,6 +14,7 @@ const moduleSchema = Joi.object({
   title: Joi.string().required().trim(),
   description: Joi.string().allow('').trim(),
   order: Joi.number().integer().min(1).required(),
+  price: Joi.number().min(0).required(),
   isAccessible: Joi.boolean().default(true),
   prerequisites: Joi.array().items(Joi.string().regex(/^[0-9a-fA-F]{24}$/)),
   dependencies: Joi.array().items(
@@ -28,6 +29,7 @@ const updateModuleSchema = Joi.object({
   title: Joi.string().trim(),
   description: Joi.string().allow('').trim(),
   order: Joi.number().integer().min(1),
+  price: Joi.number().min(0),
   isAccessible: Joi.boolean(),
   prerequisites: Joi.array().items(Joi.string().regex(/^[0-9a-fA-F]{24}$/)),
   dependencies: Joi.array().items(
@@ -152,6 +154,88 @@ async function hasModuleAccess(userId, courseId, moduleId) {
 }
 
 // Create Module
+// exports.createModule = async (req, res, next) => {
+//   const session = await mongoose.startSession()
+//   session.startTransaction()
+
+//   try {
+//     const { error, value } = moduleSchema.validate(req.body)
+//     if (error) {
+//       return res.status(400).json({
+//         message: 'Validation failed',
+//         errors: error.details.map(detail => ({
+//           field: detail.context.key,
+//           message: detail.message
+//         }))
+//       })
+//     }
+
+//     // Check for existing module with same order
+//     const existingModule = await Module.findOne({
+//       course: req.params.courseId,
+//       order: value.order,
+//       isDeleted: false
+//     }).session(session)
+
+//     if (existingModule) {
+//       await session.abortTransaction()
+//       return next(new AppError('A module with this order number already exists', 400))
+//     }
+
+//     // Validate prerequisites if provided
+//     if (value.prerequisites?.length > 0) {
+//       const prereqModules = await Module.find({
+//         _id: { $in: value.prerequisites },
+//         course: req.params.courseId,
+//         isDeleted: false
+//       }).session(session)
+
+//       if (prereqModules.length !== value.prerequisites.length) {
+//         await session.abortTransaction()
+//         return next(new AppError('One or more prerequisites are invalid', 400))
+//       }
+
+//       if (await hasCircularDependency(value.prerequisites, req.params.courseId)) {
+//         await session.abortTransaction()
+//         return next(new AppError('Circular dependency detected in prerequisites', 400))
+//       }
+//     }
+
+//     // Create module
+//     const module = await Module.create([{
+//       ...value,
+//       course: req.params.courseId
+//     }], { session })
+
+//     await session.commitTransaction()
+
+//     // Populate references
+//     const populatedModule = await Module.findById(module[0]._id)
+//       .populate([
+//         {
+//           path: 'prerequisites',
+//           select: 'title order',
+//           match: { isDeleted: false }
+//         },
+//         {
+//           path: 'dependencies.module',
+//           select: 'title order',
+//           match: { isDeleted: false }
+//         }
+//       ])
+
+//     res.status(201).json({
+//       message: 'module created successfully',
+//       data: populatedModule
+//     })
+//   } catch (error) {
+//     await session.abortTransaction()
+//     next(error)
+//   } finally {
+//     session.endSession()
+//   }
+// }
+
 exports.createModule = async (req, res, next) => {
   const session = await mongoose.startSession()
   session.startTransaction()
@@ -161,18 +245,17 @@ exports.createModule = async (req, res, next) => {
     if (error) {
       return res.status(400).json({
         message: 'Validation failed',
-        errors: error.details.map(detail => ({
+        errors: error.details.map((detail) => ({
           field: detail.context.key,
-          message: detail.message
-        }))
+          message: detail.message,
+        })),
       })
     }
 
-    // Check for existing module with same order
     const existingModule = await Module.findOne({
       course: req.params.courseId,
       order: value.order,
-      isDeleted: false
+      isDeleted: false,
     }).session(session)
 
     if (existingModule) {
@@ -180,12 +263,11 @@ exports.createModule = async (req, res, next) => {
       return next(new AppError('A module with this order number already exists', 400))
     }
 
-    // Validate prerequisites if provided
     if (value.prerequisites?.length > 0) {
       const prereqModules = await Module.find({
         _id: { $in: value.prerequisites },
         course: req.params.courseId,
-        isDeleted: false
+        isDeleted: false,
       }).session(session)
 
       if (prereqModules.length !== value.prerequisites.length) {
@@ -199,32 +281,34 @@ exports.createModule = async (req, res, next) => {
       }
     }
 
-    // Create module
-    const module = await Module.create([{
-      ...value,
-      course: req.params.courseId
-    }], { session })
+    const module = await Module.create(
+      [
+        {
+          ...value,
+          course: req.params.courseId,
+        },
+      ],
+      { session }
+    )
 
     await session.commitTransaction()
 
-    // Populate references
-    const populatedModule = await Module.findById(module[0]._id)
-      .populate([
-        {
-          path: 'prerequisites',
-          select: 'title order',
-          match: { isDeleted: false }
-        },
-        {
-          path: 'dependencies.module',
-          select: 'title order',
-          match: { isDeleted: false }
-        }
-      ])
+    const populatedModule = await Module.findById(module[0]._id).populate([
+      {
+        path: 'prerequisites',
+        select: 'title order',
+        match: { isDeleted: false },
+      },
+      {
+        path: 'dependencies.module',
+        select: 'title order',
+        match: { isDeleted: false },
+      },
+    ])
 
     res.status(201).json({
       message: 'module created successfully',
-      data: populatedModule
+      data: populatedModule,
     })
   } catch (error) {
     await session.abortTransaction()
@@ -424,6 +508,100 @@ exports.getModule = async (req, res, next) => {
 }
 
 // Update Module
+// exports.updateModule = async (req, res, next) => {
+//   const session = await mongoose.startSession()
+//   session.startTransaction()
+
+//   try {
+//     const { error, value } = updateModuleSchema.validate(req.body)
+//     if (error) {
+//       return res.status(400).json({
+//         status: 'error',
+//         errors: error.details.map(detail => ({
+//           field: detail.context.key,
+//           message: detail.message
+//         }))
+//       })
+//     }
+
+//     if (value.order) {
+//       const existingModule = await Module.findOne({
+//         course: req.params.courseId,
+//         order: value.order,
+//         _id: { $ne: req.params.moduleId },
+//         isDeleted: false
+//       }).session(session)
+
+//       if (existingModule) {
+//         await session.abortTransaction()
+//         return next(new AppError('A module with this order number already exists', 400))
+//       }
+//     }
+
+//     if (value.prerequisites?.length > 0) {
+//       const prereqModules = await Module.find({
+//         _id: { $in: value.prerequisites },
+//         course: req.params.courseId,
+//         isDeleted: false
+//       }).session(session)
+
+//       if (prereqModules.length !== value.prerequisites.length) {
+//         await session.abortTransaction()
+//         return next(new AppError('One or more prerequisites are invalid', 400))
+//       }
+
+//       if (await hasCircularDependency(
+//         value.prerequisites, 
+//         req.params.courseId, 
+//         req.params.moduleId
+//       )) {
+//         await session.abortTransaction()
+//         return next(new AppError('Circular dependency detected in prerequisites', 400))
+//       }
+//     }
+
+//     const module = await Module.findOneAndUpdate(
+//       {
+//         _id: req.params.moduleId,
+//         course: req.params.courseId,
+//         isDeleted: false
+//       },
+//       value,
+//       {
+//         new: true,
+//         runValidators: true,
+//         session
+//       }
+//     ).populate([
+//       {
+//         path: 'prerequisites',
+//         select: 'title order'
+//       },
+//       {
+//         path: 'dependencies.module',
+//         select: 'title order'
+//       }
+//     ])
+
+//     if (!module) {
+//       await session.abortTransaction()
+//       return next(new AppError('Module not found', 404))
+//     }
+
+//     await session.commitTransaction()
+
+//     res.status(200).json({
+//       message: 'Module updated successfully',
+//       data: module
+//     })
+//   } catch (error) {
+//     await session.abortTransaction()
+//     next(error)
+//   } finally {
+//     session.endSession()
+//   }
+// }
+
 exports.updateModule = async (req, res, next) => {
   const session = await mongoose.startSession()
   session.startTransaction()
@@ -433,10 +611,10 @@ exports.updateModule = async (req, res, next) => {
     if (error) {
       return res.status(400).json({
         status: 'error',
-        errors: error.details.map(detail => ({
+        errors: error.details.map((detail) => ({
           field: detail.context.key,
-          message: detail.message
-        }))
+          message: detail.message,
+        })),
       })
     }
 
@@ -445,7 +623,7 @@ exports.updateModule = async (req, res, next) => {
         course: req.params.courseId,
         order: value.order,
         _id: { $ne: req.params.moduleId },
-        isDeleted: false
+        isDeleted: false,
       }).session(session)
 
       if (existingModule) {
@@ -458,7 +636,7 @@ exports.updateModule = async (req, res, next) => {
       const prereqModules = await Module.find({
         _id: { $in: value.prerequisites },
         course: req.params.courseId,
-        isDeleted: false
+        isDeleted: false,
       }).session(session)
 
       if (prereqModules.length !== value.prerequisites.length) {
@@ -466,11 +644,7 @@ exports.updateModule = async (req, res, next) => {
         return next(new AppError('One or more prerequisites are invalid', 400))
       }
 
-      if (await hasCircularDependency(
-        value.prerequisites, 
-        req.params.courseId, 
-        req.params.moduleId
-      )) {
+      if (await hasCircularDependency(value.prerequisites, req.params.courseId, req.params.moduleId)) {
         await session.abortTransaction()
         return next(new AppError('Circular dependency detected in prerequisites', 400))
       }
@@ -480,23 +654,23 @@ exports.updateModule = async (req, res, next) => {
       {
         _id: req.params.moduleId,
         course: req.params.courseId,
-        isDeleted: false
+        isDeleted: false,
       },
       value,
       {
         new: true,
         runValidators: true,
-        session
+        session,
       }
     ).populate([
       {
         path: 'prerequisites',
-        select: 'title order'
+        select: 'title order',
       },
       {
         path: 'dependencies.module',
-        select: 'title order'
-      }
+        select: 'title order',
+      },
     ])
 
     if (!module) {
@@ -508,7 +682,7 @@ exports.updateModule = async (req, res, next) => {
 
     res.status(200).json({
       message: 'Module updated successfully',
-      data: module
+      data: module,
     })
   } catch (error) {
     await session.abortTransaction()
