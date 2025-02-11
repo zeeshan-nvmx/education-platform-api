@@ -144,7 +144,7 @@ exports.signup = async (req, res, next) => {
       verificationToken,
     })
 
-    await sendVerificationOtp(email, verificationToken)
+    // await sendVerificationOtp(email, verificationToken)
 
     const token = generateToken({ id: user._id })
 
