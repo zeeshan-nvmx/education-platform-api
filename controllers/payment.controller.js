@@ -32,13 +32,32 @@ const initiateModulePaymentSchema = Joi.object({
   }).required(),
 }).options({ abortEarly: false })
 
+// const verifyPaymentSchema = Joi.object({
+//   tran_id: Joi.string().required(),
+//   val_id: Joi.string().required(),
+//   status: Joi.string().required(),
+// }).options({ abortEarly: false })
+
+// Helper function to calculate discounted amount - remains the same as it's robust
+
 const verifyPaymentSchema = Joi.object({
   tran_id: Joi.string().required(),
   val_id: Joi.string().required(),
+  amount: Joi.string(),
+  card_type: Joi.string(),
+  store_amount: Joi.string(),
+  card_no: Joi.string(),
+  bank_tran_id: Joi.string(),
   status: Joi.string().required(),
-}).options({ abortEarly: false })
+  tran_date: Joi.string(),
+  error: Joi.string(),
+  currency: Joi.string(),
+  card_issuer: Joi.string(),
+  card_brand: Joi.string(),
+  risk_level: Joi.string(),
+  risk_title: Joi.string(),
+}).options({ abortEarly: false, stripUnknown: true })
 
-// Helper function to calculate discounted amount - remains the same as it's robust
 async function calculateDiscountedAmount(amount, discountCode, courseId, moduleId = null) {
   if (!discountCode) return { discountedAmount: amount, discount: null }
 
@@ -401,13 +420,128 @@ exports.initiateModulePayment = async (req, res, next) => {
   }
 }
 
+// exports.verifyPayment = async (req, res, next) => {
+//   const session = await mongoose.startSession()
+//   session.startTransaction()
+
+//   try {
+//     const { error, value } = verifyPaymentSchema.validate(req.query)
+//     if (error) {
+//       return res.status(400).json({
+//         status: 'error',
+//         errors: error.details.map((detail) => ({
+//           field: detail.context.key,
+//           message: detail.message,
+//         })),
+//       })
+//     }
+
+//     const { tran_id, val_id, status } = value
+
+//     const payment = await Payment.findOne({
+//       transactionId: tran_id,
+//       status: 'pending',
+//     }).session(session)
+
+//     if (!payment) {
+//       await session.abortTransaction()
+//       return next(new AppError('Invalid transaction', 400))
+//     }
+
+//     if (status !== 'VALID') {
+//       payment.status = 'failed'
+//       payment.validationResponse = req.query
+//       await payment.save({ session })
+
+//       await session.commitTransaction()
+
+//       return res.status(200).json({
+//         status: 'success',
+//         data: {
+//           verified: false,
+//           message: 'Payment validation failed',
+//           transactionId: tran_id,
+//         },
+//       })
+//     }
+
+//     // Verify with SSLCommerz
+//     const validationResponse = await validatePayment({ val_id })
+//     payment.validationResponse = validationResponse
+
+//     if (validationResponse.status !== 'VALID') {
+//       payment.status = 'failed'
+//       await payment.save({ session })
+
+//       await session.commitTransaction()
+
+//       return res.status(200).json({
+//         status: 'success',
+//         data: {
+//           verified: false,
+//           message: 'Gateway validation failed',
+//           transactionId: tran_id,
+//         },
+//       })
+//     }
+
+//     // Process enrollment if payment is valid
+//     await processEnrollment(payment.user, payment.course, payment.purchaseType, payment.modules || [], session)
+
+//     // Update payment status
+//     payment.status = 'completed'
+//     payment.completedAt = new Date()
+//     await payment.save({ session })
+
+//     // Update course total students if needed
+//     const existingEnrollment = await User.findOne({
+//       _id: payment.user,
+//       'enrolledCourses.course': payment.course,
+//     }).session(session)
+
+//     if (!existingEnrollment) {
+//       await Course.updateOne({ _id: payment.course }, { $inc: { totalStudents: 1 } }, { session })
+//     }
+
+//     // Update discount usage if applicable
+//     if (payment.discount) {
+//       await Discount.updateOne({ _id: payment.discount }, { $inc: { usedCount: 1 } }, { session })
+//     }
+
+//     await session.commitTransaction()
+
+//     res.status(200).json({
+//       status: 'success',
+//       data: {
+//         verified: true,
+//         transactionId: tran_id,
+//         amount: payment.discountedAmount || payment.amount,
+//         purchaseType: payment.purchaseType,
+//         courseId: payment.course,
+//         moduleIds: payment.modules,
+//         completedAt: payment.completedAt,
+//       },
+//     })
+//   } catch (error) {
+//     await session.abortTransaction()
+//     next(error)
+//   } finally {
+//     session.endSession()
+//   }
+// }
+
+// Get payment history for a user
+
 exports.verifyPayment = async (req, res, next) => {
   const session = await mongoose.startSession()
   session.startTransaction()
 
   try {
+    console.log('Payment verification request:', req.query)
+
     const { error, value } = verifyPaymentSchema.validate(req.query)
     if (error) {
+      console.error('Validation error:', error.details)
       return res.status(400).json({
         status: 'error',
         errors: error.details.map((detail) => ({
@@ -417,40 +551,58 @@ exports.verifyPayment = async (req, res, next) => {
       })
     }
 
-    const { tran_id, val_id, status } = value
+    const { tran_id, val_id, status, amount, bank_tran_id, card_type } = value
 
+    // Find the pending payment
     const payment = await Payment.findOne({
       transactionId: tran_id,
       status: 'pending',
     }).session(session)
 
     if (!payment) {
+      console.error('Payment not found:', tran_id)
       await session.abortTransaction()
       return next(new AppError('Invalid transaction', 400))
     }
 
+    // Store the raw response
+    payment.validationResponse = req.query
+
+    // Handle non-successful status
     if (status !== 'VALID') {
+      console.log('Payment status not valid:', status)
       payment.status = 'failed'
-      payment.validationResponse = req.query
       await payment.save({ session })
 
       await session.commitTransaction()
 
       return res.status(200).json({
         status: 'success',
+        message: 'Payment validation failed',
         data: {
           verified: false,
           message: 'Payment validation failed',
           transactionId: tran_id,
+          amount: amount,
+          bankTransactionId: bank_tran_id,
+          paymentMethod: card_type,
         },
       })
     }
 
     // Verify with SSLCommerz
+    console.log('Verifying with SSLCommerz:', val_id)
     const validationResponse = await validatePayment({ val_id })
-    payment.validationResponse = validationResponse
+    console.log('SSLCommerz validation response:', validationResponse)
 
+    payment.validationResponse = {
+      ...payment.validationResponse,
+      sslcommerzValidation: validationResponse,
+    }
+
+    // Check SSLCommerz validation
     if (validationResponse.status !== 'VALID') {
+      console.error('SSLCommerz validation failed:', validationResponse)
       payment.status = 'failed'
       await payment.save({ session })
 
@@ -458,52 +610,83 @@ exports.verifyPayment = async (req, res, next) => {
 
       return res.status(200).json({
         status: 'success',
+        message: 'Gateway validation failed',
         data: {
           verified: false,
           message: 'Gateway validation failed',
           transactionId: tran_id,
+          details: validationResponse,
         },
       })
     }
 
-    // Process enrollment if payment is valid
-    await processEnrollment(payment.user, payment.course, payment.purchaseType, payment.modules || [], session)
+    // Validate amount matches (convert to same format)
+    const expectedAmount = payment.discountedAmount || payment.amount
+    const receivedAmount = parseFloat(amount)
 
-    // Update payment status
-    payment.status = 'completed'
-    payment.completedAt = new Date()
-    await payment.save({ session })
+    if (receivedAmount !== expectedAmount) {
+      console.error('Amount mismatch:', { expected: expectedAmount, received: receivedAmount })
+      payment.status = 'failed'
+      await payment.save({ session })
 
-    // Update course total students if needed
-    const existingEnrollment = await User.findOne({
-      _id: payment.user,
-      'enrolledCourses.course': payment.course,
-    }).session(session)
-
-    if (!existingEnrollment) {
-      await Course.updateOne({ _id: payment.course }, { $inc: { totalStudents: 1 } }, { session })
+      await session.commitTransaction()
+      return next(new AppError('Payment amount mismatch', 400))
     }
 
-    // Update discount usage if applicable
-    if (payment.discount) {
-      await Discount.updateOne({ _id: payment.discount }, { $inc: { usedCount: 1 } }, { session })
+    try {
+      // Process enrollment
+      await processEnrollment(payment.user, payment.course, payment.purchaseType, payment.modules || [], session)
+
+      // Update payment status
+      payment.status = 'completed'
+      payment.completedAt = new Date()
+      payment.bankTransactionId = bank_tran_id
+      payment.paymentMethod = card_type
+      await payment.save({ session })
+
+      // Update course total students if needed
+      const existingEnrollment = await User.findOne({
+        _id: payment.user,
+        'enrolledCourses.course': payment.course,
+      }).session(session)
+
+      if (!existingEnrollment) {
+        await Course.updateOne({ _id: payment.course }, { $inc: { totalStudents: 1 } }, { session })
+      }
+
+      // Update discount usage if applicable
+      if (payment.discount) {
+        await Discount.updateOne({ _id: payment.discount }, { $inc: { usedCount: 1 } }, { session })
+      }
+
+      await session.commitTransaction()
+
+      return res.status(200).json({
+        status: 'success',
+        message: 'Payment Successfully verified, congratulations!',
+        data: {
+          verified: true,
+          transactionId: tran_id,
+          amount: expectedAmount,
+          bankTransactionId: bank_tran_id,
+          paymentMethod: card_type,
+          purchaseType: payment.purchaseType,
+          courseId: payment.course,
+          moduleIds: payment.modules,
+          completedAt: payment.completedAt,
+        },
+      })
+    } catch (enrollmentError) {
+      console.error('Enrollment processing error:', enrollmentError)
+      payment.status = 'failed'
+      payment.validationResponse.enrollmentError = enrollmentError.message
+      await payment.save({ session })
+
+      await session.abortTransaction()
+      throw enrollmentError
     }
-
-    await session.commitTransaction()
-
-    res.status(200).json({
-      status: 'success',
-      data: {
-        verified: true,
-        transactionId: tran_id,
-        amount: payment.discountedAmount || payment.amount,
-        purchaseType: payment.purchaseType,
-        courseId: payment.course,
-        moduleIds: payment.modules,
-        completedAt: payment.completedAt,
-      },
-    })
   } catch (error) {
+    console.error('Payment verification error:', error)
     await session.abortTransaction()
     next(error)
   } finally {
@@ -511,7 +694,6 @@ exports.verifyPayment = async (req, res, next) => {
   }
 }
 
-// Get payment history for a user
 exports.getPaymentHistory = async (req, res, next) => {
   try {
     const payments = await Payment.find({ user: req.user._id })
