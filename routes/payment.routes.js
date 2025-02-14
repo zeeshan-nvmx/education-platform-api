@@ -2,51 +2,20 @@ const express = require('express')
 const { protect } = require('../middleware/auth')
 const validateMongoId = require('../middleware/validateMongoId')
 
-const { initiateCoursePayment, initiateModulePayment, verifyPayment, getPaymentHistory, requestRefund, verifyCoupon } = require('../controllers/payment.controller')
+const { initiateCoursePayment, initiateModulePayment, verifyPayment, getPaymentHistory, getPaymentDetails } = require('../controllers/payment.controller')
 
-const router = express.Router()
+const router = express.Router({ mergeParams: true })
 
 // Payment initiation routes
-router.post('/course/:courseId', protect, validateMongoId, initiateCoursePayment)
+router.post('/courses/:courseId/initiate-course', protect, validateMongoId, initiateCoursePayment)
 
-router.post('/module/:courseId/:moduleId', protect, validateMongoId, initiateModulePayment)
+router.post('/courses/:courseId/initiate-module', protect, validateMongoId, initiateModulePayment)
 
-// Payment verification and status
-router.post('/verify', protect, verifyPayment)
+// Payment verification route
+router.get('/verify', verifyPayment)
 
+// Payment history routes
 router.get('/history', protect, getPaymentHistory)
-
-// Refund routes
-router.post('/refund/:paymentId', protect, validateMongoId, requestRefund)
-
-// Coupon verification
-router.post('/verify-coupon', protect, verifyCoupon)
+router.get('/:paymentId', protect, validateMongoId, getPaymentDetails)
 
 module.exports = router
-
-// const express = require('express')
-// const { protect } = require('../middleware/auth')
-// const validateMongoId = require('../middleware/validateMongoId')
-
-// const { initiateCoursePayment, initiateModulePayment, verifyPayment, getPaymentHistory, requestRefund, verifyCoupon } = require('../controllers/payment.controller')
-
-// const router = express.Router()
-
-// // Protect all payment routes
-// router.use(protect)
-
-// // Payment initiation routes
-// router.post('/course/:courseId', validateMongoId, initiateCoursePayment)
-// router.post('/module/:courseId/:moduleId', validateMongoId, initiateModulePayment)
-
-// // Payment verification and status
-// router.post('/verify', verifyPayment)
-// router.get('/history', getPaymentHistory)
-
-// // Refund routes
-// router.post('/refund/:paymentId', validateMongoId, requestRefund)
-
-// // Coupon verification
-// router.post('/verify-coupon', verifyCoupon)
-
-// module.exports = router
