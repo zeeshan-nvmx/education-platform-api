@@ -241,6 +241,13 @@ exports.createModule = async (req, res, next) => {
   session.startTransaction()
 
   try {
+    // First verify if course exists
+    const course = await Course.findById(req.params.courseId)
+    if (!course) {
+      await session.abortTransaction()
+      return next(new AppError('Course not found', 404))
+    }
+
     const { error, value } = moduleSchema.validate(req.body)
     if (error) {
       return res.status(400).json({
@@ -281,15 +288,12 @@ exports.createModule = async (req, res, next) => {
       }
     }
 
-    const module = await Module.create(
-      [
-        {
-          ...value,
-          course: req.params.courseId,
-        },
-      ],
-      { session }
-    )
+    const moduleData = {
+      ...value,
+      course: req.params.courseId, // Explicitly set the course ID
+    }
+
+    const module = await Module.create([moduleData], { session })
 
     await session.commitTransaction()
 
@@ -307,7 +311,7 @@ exports.createModule = async (req, res, next) => {
     ])
 
     res.status(201).json({
-      message: 'module created successfully',
+      message: 'Module created successfully',
       data: populatedModule,
     })
   } catch (error) {
