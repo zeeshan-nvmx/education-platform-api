@@ -2,7 +2,7 @@
 const express = require('express')
 const { protect } = require('../middleware/auth')
 const validateMongoId = require('../middleware/validateMongoId')
-const { initiateCoursePayment, initiateModulePayment, handleIPN, getPaymentHistory, getPaymentDetails, verifyPayment } = require('../controllers/payment.controller')
+const { initiateCoursePayment, initiateModulePayment, handleIPN, getPaymentHistory, getPaymentDetails, verifyPayment, handlePaymentRedirect } = require('../controllers/payment.controller')
 
 const router = express.Router({ mergeParams: true })
 
@@ -10,6 +10,8 @@ const router = express.Router({ mergeParams: true })
 router.post('/courses/:courseId/initiate-course', protect, validateMongoId, initiateCoursePayment)
 
 router.post('/courses/:courseId/initiate-module', protect, validateMongoId, initiateModulePayment)
+
+router.get('/redirect', handlePaymentRedirect)
 
 // IPN route - no authentication middleware as it's called by SSLCommerz
 router.post('/ipn', handleIPN)

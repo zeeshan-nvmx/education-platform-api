@@ -50,10 +50,10 @@ const ipnValidationSchema = Joi.object({
   risk_title: Joi.string().allow('', null),
   verify_sign: Joi.string().required(),
   verify_key: Joi.string().required(),
-}).options({ 
-  abortEarly: false, 
+}).options({
+  abortEarly: false,
   stripUnknown: true,
-  allowUnknown: true // Allow additional fields from SSLCommerz
+  allowUnknown: true, // Allow additional fields from SSLCommerz
 })
 
 // Helper functions
@@ -75,9 +75,7 @@ async function calculateDiscountedAmount(amount, discountCode, courseId, moduleI
 
   if (!discount) return { discountedAmount: amount, discount: null }
 
-  const discountAmount = discount.type === 'percentage' 
-    ? (amount * discount.value) / 100 
-    : discount.value
+  const discountAmount = discount.type === 'percentage' ? (amount * discount.value) / 100 : discount.value
 
   return {
     discountedAmount: Math.max(0, amount - discountAmount),
@@ -103,12 +101,8 @@ async function verifyAccess(userId, courseId, moduleIds = []) {
   }
 
   if (moduleIds.length > 0) {
-    const enrolledModuleIds = enrolledCourse.enrolledModules.map(
-      (em) => em.module.toString()
-    )
-    return !moduleIds.some(
-      (moduleId) => enrolledModuleIds.includes(moduleId.toString())
-    )
+    const enrolledModuleIds = enrolledCourse.enrolledModules.map((em) => em.module.toString())
+    return !moduleIds.some((moduleId) => enrolledModuleIds.includes(moduleId.toString()))
   }
 
   return true
@@ -120,9 +114,7 @@ async function processEnrollment(userId, courseId, purchaseType, moduleIds = [],
     throw new AppError('User not found', 404)
   }
 
-  const existingEnrollment = user.enrolledCourses.find(
-    (ec) => ec.course.toString() === courseId
-  )
+  const existingEnrollment = user.enrolledCourses.find((ec) => ec.course.toString() === courseId)
 
   if (purchaseType === 'course') {
     if (existingEnrollment) {
@@ -143,9 +135,7 @@ async function processEnrollment(userId, courseId, purchaseType, moduleIds = [],
 
     if (existingEnrollment) {
       moduleIds.forEach((moduleId) => {
-        if (!existingEnrollment.enrolledModules.some(
-          (em) => em.module.toString() === moduleId.toString()
-        )) {
+        if (!existingEnrollment.enrolledModules.some((em) => em.module.toString() === moduleId.toString())) {
           existingEnrollment.enrolledModules.push({
             module: moduleId,
             enrolledAt: new Date(),
@@ -216,9 +206,12 @@ exports.initiateCoursePayment = async (req, res, next) => {
       total_amount: discountedAmount,
       currency: 'BDT',
       tran_id: transactionId,
-      success_url: value.redirectUrl,
-      fail_url: value.redirectUrl,
-      cancel_url: value.redirectUrl,
+      // success_url: `${value.redirectUrl}/success`,
+      // fail_url: `${value.redirectUrl}/fail`,
+      // cancel_url: `${value.redirectUrl}/cancel`,
+      success_url: `${process.env.API_BASE_URL}/api/payments/redirect`,
+      fail_url: `${process.env.API_BASE_URL}/api/payments/redirect`,
+      cancel_url: `${process.env.API_BASE_URL}/api/payments/redirect`,
       ipn_url: `${process.env.API_BASE_URL}/api/payments/ipn`,
       product_name: course.title,
       product_category: 'Course',
@@ -429,6 +422,60 @@ exports.initiateModulePayment = async (req, res, next) => {
   }
 }
 
+exports.handlePaymentRedirect = async (req, res, next) => {
+  try {
+    console.log('Payment redirect data:', req.query)
+
+    const { status, tran_id, val_id } = req.query
+
+    // Find the payment record
+    const payment = await Payment.findOne({ transactionId: tran_id })
+
+    if (!payment) {
+      console.error('Payment not found for transaction:', tran_id)
+      return res.redirect(`${process.env.FRONTEND_URL}/payment/verify-payment/error?message=invalid_transaction`)
+    }
+
+    // Store the redirect response
+    await Payment.updateOne(
+      { transactionId: tran_id },
+      {
+        $set: {
+          redirectResponse: req.query,
+          updatedAt: new Date(),
+        },
+      }
+    )
+
+    // Handle different status cases
+    let redirectUrl = process.env.FRONTEND_URL
+
+    switch (status?.toUpperCase()) {
+      case 'VALID':
+        redirectUrl += `/payment/verify-payment/success?tran_id=${tran_id}&val_id=${val_id}`
+        break
+
+      case 'FAILED':
+        redirectUrl += `/payment/verify-payment/failed?tran_id=${tran_id}`
+        break
+
+      case 'CANCELLED':
+        redirectUrl += `/payment/verify-payment/cancelled?tran_id=${tran_id}`
+        break
+
+      default:
+        redirectUrl += `/payment/verify-payment/error?message=invalid_status`
+    }
+
+    // Add any additional query parameters you want to pass to frontend
+    redirectUrl += `&amount=${payment.amount}`
+
+    res.redirect(redirectUrl)
+  } catch (error) {
+    console.error('Payment redirect handling error:', error)
+    res.redirect(`${process.env.FRONTEND_URL}/payment/verify-payment/error?message=server_error`)
+  }
+}
 
 exports.handleIPN = async (req, res, next) => {
   const session = await mongoose.startSession()
@@ -514,20 +561,12 @@ exports.handleIPN = async (req, res, next) => {
       }).session(session)
 
       if (!existingEnrollment) {
-        await Course.updateOne(
-          { _id: payment.course }, 
-          { $inc: { totalStudents: 1 } }, 
-          { session }
-        )
+        await Course.updateOne({ _id: payment.course }, { $inc: { totalStudents: 1 } }, { session })
       }
 
       // Update discount usage if applicable
       if (payment.discount) {
-        await Discount.updateOne(
-          { _id: payment.discount }, 
-          { $inc: { usedCount: 1 } }, 
-          { session }
-        )
+        await Discount.updateOne({ _id: payment.discount }, { $inc: { usedCount: 1 } }, { session })
       }
 
       await session.commitTransaction()
@@ -581,26 +620,20 @@ exports.verifyPayment = async (req, res, next) => {
       payment.failureReason = `Invalid payment status: ${status}`
       await payment.save({ session })
       await session.commitTransaction()
-      
+
       return res.status(200).json({
         status: 'success',
         data: {
           verified: false,
           message: 'Payment verification failed',
-          transactionId: tran_id
-        }
+          transactionId: tran_id,
+        },
       })
     }
 
     try {
       // Process enrollment
-      await processEnrollment(
-        payment.user, 
-        payment.course, 
-        payment.purchaseType, 
-        payment.modules || [], 
-        session
-      )
+      await processEnrollment(payment.user, payment.course, payment.purchaseType, payment.modules || [], session)
 
       // Update payment record
       payment.status = 'completed'
@@ -614,20 +647,12 @@ exports.verifyPayment = async (req, res, next) => {
       }).session(session)
 
       if (!existingEnrollment) {
-        await Course.updateOne(
-          { _id: payment.course }, 
-          { $inc: { totalStudents: 1 } }, 
-          { session }
-        )
+        await Course.updateOne({ _id: payment.course }, { $inc: { totalStudents: 1 } }, { session })
       }
 
       // Update discount usage if applicable
       if (payment.discount) {
-        await Discount.updateOne(
-          { _id: payment.discount }, 
-          { $inc: { usedCount: 1 } }, 
-          { session }
-        )
+        await Discount.updateOne({ _id: payment.discount }, { $inc: { usedCount: 1 } }, { session })
       }
 
       await session.commitTransaction()
@@ -638,8 +663,8 @@ exports.verifyPayment = async (req, res, next) => {
           verified: true,
           transactionId: tran_id,
           amount: payment.discountedAmount || payment.amount,
-          completedAt: payment.completedAt
-        }
+          completedAt: payment.completedAt,
+        },
       })
     } catch (enrollmentError) {
       console.error('Enrollment processing error:', enrollmentError)
@@ -695,7 +720,7 @@ exports.getPaymentDetails = async (req, res, next) => {
       delete payment.ipnResponse.verify_key
       delete payment.ipnResponse.verify_sign
     }
-    
+
     if (payment.verificationResponse) {
       delete payment.verificationResponse.verify_key
       delete payment.verificationResponse.verify_sign
@@ -709,7 +734,6 @@ exports.getPaymentDetails = async (req, res, next) => {
     next(error)
   }
 }
-
 
 /*
 
