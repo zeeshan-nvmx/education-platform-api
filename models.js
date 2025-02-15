@@ -771,9 +771,18 @@ const paymentSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['pending', 'completed', 'failed', 'refunded'],
+      enum: ['pending', 'processing', 'completed', 'failed', 'cancelled'],
       default: 'pending',
-      index: true,
+    },
+    redirectStatus: {
+      type: String,
+      enum: ['pending', 'success', 'failed', 'cancelled'],
+      default: 'pending',
+    },
+    ipnStatus: {
+      type: String,
+      enum: ['pending', 'success', 'failed'],
+      default: 'pending',
     },
     transactionId: {
       type: String,
