@@ -1,5 +1,4 @@
 // utils/sslcommerz.js
-
 const SSLCommerzPayment = require('sslcommerz-lts')
 const crypto = require('crypto')
 
@@ -28,19 +27,23 @@ exports.initiatePayment = async (data) => {
 // Validate IPN signature and data
 exports.validateIPN = async (ipnData) => {
   try {
-    const { verify_sign, verify_key, ...dataToVerify } = ipnData
+    const { verify_sign, verify_key } = ipnData
 
-    // Sort the data alphabetically by key
-    const sortedData = Object.keys(dataToVerify)
-      .sort()
-      .reduce((obj, key) => {
-        obj[key] = dataToVerify[key]
-        return obj
-      }, {})
+    if (!verify_key) {
+      console.error('Verify key missing in IPN data')
+      return false
+    }
 
-    // Create the verification string
-    const verificationString = Object.entries(sortedData)
-      .map(([key, value]) => `${key}=${value}`)
+    // Get the ordered list of fields from verify_key
+    const orderedFields = verify_key.split(',')
+
+    // Create verification string using the exact order from verify_key
+    const verificationString = orderedFields
+      .map((field) => {
+        // Handle undefined or null values as empty string
+        const value = ipnData[field] ?? ''
+        return `${field}=${value}`
+      })
       .join('&')
 
     // Add store password
@@ -49,18 +52,26 @@ exports.validateIPN = async (ipnData) => {
     // Generate MD5 hash
     const calculatedHash = crypto.createHash('md5').update(finalString).digest('hex')
 
-    // Verify the signature
+    // Compare hashes
     const isValidSignature = calculatedHash.toLowerCase() === verify_sign.toLowerCase()
 
     if (!isValidSignature) {
       console.error('IPN signature verification failed')
+      console.error('Calculated hash:', calculatedHash)
+      console.error('Received hash:', verify_sign)
       return false
     }
 
-    // Additional validation through SSLCommerz API
+    // For additional security, validate through SSLCommerz API if val_id is present
     if (ipnData.val_id) {
-      const validationResponse = await sslcommerz.validate({ val_id: ipnData.val_id })
-      return validationResponse?.status === 'VALID'
+      try {
+        const validationResponse = await sslcommerz.validate({ val_id: ipnData.val_id })
+        return validationResponse?.status === 'VALID'
+      } catch (validationError) {
+        console.error('SSLCommerz validation API error:', validationError)
+        // If API validation fails, still accept if signature is valid
+        return isValidSignature
+      }
     }
 
     return isValidSignature
