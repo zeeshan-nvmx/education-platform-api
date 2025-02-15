@@ -11,7 +11,7 @@ router.post('/courses/:courseId/initiate-course', protect, validateMongoId, init
 
 router.post('/courses/:courseId/initiate-module', protect, validateMongoId, initiateModulePayment)
 
-router.get('/redirect', handlePaymentRedirect)
+router.post('/redirect', handlePaymentRedirect)
 
 // IPN route - no authentication middleware as it's called by SSLCommerz
 router.post('/ipn', handleIPN)
