@@ -1,6 +1,5 @@
 // utils/sslcommerz.js
 const SSLCommerzPayment = require('sslcommerz-lts')
-const crypto = require('crypto')
 
 const store_id = process.env.SSLCOMMERZ_STORE_ID
 const store_passwd = process.env.SSLCOMMERZ_STORE_PASSWORD
@@ -23,109 +22,62 @@ exports.initiatePayment = async (data) => {
 
 exports.validateIPN = async (ipnData) => {
   try {
-    console.log('Validating IPN with raw data:', ipnData)
+    console.log('Starting IPN validation for transaction:', ipnData.tran_id)
 
-    const { verify_sign, verify_key } = ipnData
+    const {
+      status,
+      tran_id,
+      val_id,
+      amount,
+      currency,
+      store_amount,
+      currency_amount,
+      currency_type,
+      value_a, // course_id
+      value_b, // purchase_type
+      value_c, // user_id
+    } = ipnData
 
-    if (!verify_key || !verify_sign) {
-      console.error('Missing required verification data')
+    // 1. Check if status is valid
+    if (status !== 'VALID') {
+      console.log('Payment status not valid:', status)
       return false
     }
 
-    // Use raw data directly to build verification string
-    const verificationString = verify_key
-      .split(',')
-      .map((field) => {
-        let value = ipnData[field]
-        // Convert undefined/null to empty string but keep 0 values
-        value = value === undefined || value === null ? '' : value
-        return `${field}=${value}`
-      })
-      .join('&')
+    // 2. Validate through SSLCommerz API
+    if (val_id) {
+      try {
+        console.log('Validating through SSLCommerz API')
+        const validationResponse = await sslcommerz.validate({ val_id })
 
-    // Add store password
-    const finalString = `${verificationString}&store_passwd=${store_passwd}`
-
-    // Debug logs
-    console.log('Fields in order:', verify_key.split(','))
-    console.log('Verification string:', verificationString)
-
-    // Log verification details for debugging
-    console.log('Final verification string:', finalString)
-
-    // Calculate MD5 hash
-    const calculatedHash = crypto.createHash('md5').update(finalString).digest('hex')
-
-    // Log hash comparison
-    console.log('Calculated hash:', calculatedHash)
-    console.log('Received hash:', verify_sign)
-
-    // Compare hashes
-    const isValid = calculatedHash.toLowerCase() === verify_sign.toLowerCase()
-
-    if (!isValid) {
-      console.error('Local hash verification failed')
-
-      // If local verification fails but we have a val_id, try API validation
-      if (ipnData.val_id) {
-        try {
-          console.log('Attempting API validation with val_id:', ipnData.val_id)
-          const validationResponse = await sslcommerz.validate({ val_id: ipnData.val_id })
-          console.log('API validation response:', validationResponse)
-
-          // Accept the payment if API validates it
-          if (validationResponse?.status === 'VALID') {
-            console.log('Payment validated through API')
-            return true
-          }
-        } catch (validationError) {
-          console.error('API validation failed:', validationError)
+        if (validationResponse?.status !== 'VALID') {
+          console.error('SSLCommerz API validation failed:', validationResponse)
+          return false
         }
-      }
 
-      return false
+        console.log('Payment validated through SSLCommerz API')
+        return true
+      } catch (apiError) {
+        console.error('SSLCommerz API validation error:', apiError)
+        return false
+      }
     }
 
-    return true
+    // If no val_id is present (shouldn't happen, but just in case)
+    console.error('No validation ID present in IPN data')
+    return false
   } catch (error) {
     console.error('IPN validation error:', error)
     return false
   }
 }
 
-// Additional SSLCommerz utility functions
 exports.validatePayment = async ({ val_id }) => {
   try {
     const response = await sslcommerz.validate({ val_id })
     return response
   } catch (error) {
     console.error('SSLCommerz payment validation error:', error)
-    throw error
-  }
-}
-
-exports.initiateRefund = async ({ refund_amount, trans_id, reason }) => {
-  try {
-    const response = await sslcommerz.initiateRefund({
-      refund_amount,
-      trans_id,
-      reason,
-    })
-    return response
-  } catch (error) {
-    console.error('SSLCommerz refund initiation error:', error)
-    throw error
-  }
-}
-
-exports.checkRefundStatus = async ({ refund_ref_id }) => {
-  try {
-    const response = await sslcommerz.refundQuery({
-      refund_ref_id,
-    })
-    return response
-  } catch (error) {
-    console.error('SSLCommerz refund status check error:', error)
     throw error
   }
 }
@@ -138,18 +90,6 @@ exports.queryTransaction = async ({ trans_id }) => {
     return response
   } catch (error) {
     console.error('SSLCommerz transaction query error:', error)
-    throw error
-  }
-}
-
-exports.queryTransactionBySession = async ({ sessionkey }) => {
-  try {
-    const response = await sslcommerz.transactionQueryBySessionId({
-      sessionkey,
-    })
-    return response
-  } catch (error) {
-    console.error('SSLCommerz session query error:', error)
     throw error
   }
 }
