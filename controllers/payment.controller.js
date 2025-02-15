@@ -424,9 +424,9 @@ exports.initiateModulePayment = async (req, res, next) => {
 
 exports.handlePaymentRedirect = async (req, res, next) => {
   try {
-    console.log('Payment redirect data:', req.query)
+    console.log('Payment redirect data:', req.body)
 
-    const { status, tran_id, val_id } = req.query
+    const { status, tran_id, val_id } = req.body
 
     // Find the payment record
     const payment = await Payment.findOne({ transactionId: tran_id })
