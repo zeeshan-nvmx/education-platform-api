@@ -23,29 +23,32 @@ exports.initiatePayment = async (data) => {
 
 exports.validateIPN = async (ipnData) => {
   try {
-    console.log('Validating IPN with data:', JSON.stringify(ipnData, null, 2))
+    console.log('Validating IPN with raw data:', ipnData)
 
     const { verify_sign, verify_key } = ipnData
 
-    if (!verify_key) {
-      console.error('Verify key missing in IPN data')
+    if (!verify_key || !verify_sign) {
+      console.error('Missing required verification data')
       return false
     }
 
-    // Create a normalized copy of the data
-    const normalizedData = { ...ipnData }
-    delete normalizedData.verify_sign
-    delete normalizedData.verify_key
-    delete normalizedData.verify_sign_sha2
-
-    // Build verification string using all received fields
+    // Use raw data directly to build verification string
     const verificationString = verify_key
       .split(',')
-      .map((field) => `${field}=${normalizedData[field] || ''}`)
+      .map((field) => {
+        let value = ipnData[field]
+        // Convert undefined/null to empty string but keep 0 values
+        value = value === undefined || value === null ? '' : value
+        return `${field}=${value}`
+      })
       .join('&')
 
     // Add store password
     const finalString = `${verificationString}&store_passwd=${store_passwd}`
+
+    // Debug logs
+    console.log('Fields in order:', verify_key.split(','))
+    console.log('Verification string:', verificationString)
 
     // Log verification details for debugging
     console.log('Final verification string:', finalString)
@@ -61,25 +64,29 @@ exports.validateIPN = async (ipnData) => {
     const isValid = calculatedHash.toLowerCase() === verify_sign.toLowerCase()
 
     if (!isValid) {
-      console.error('Hash verification failed')
+      console.error('Local hash verification failed')
+
+      // If local verification fails but we have a val_id, try API validation
+      if (ipnData.val_id) {
+        try {
+          console.log('Attempting API validation with val_id:', ipnData.val_id)
+          const validationResponse = await sslcommerz.validate({ val_id: ipnData.val_id })
+          console.log('API validation response:', validationResponse)
+
+          // Accept the payment if API validates it
+          if (validationResponse?.status === 'VALID') {
+            console.log('Payment validated through API')
+            return true
+          }
+        } catch (validationError) {
+          console.error('API validation failed:', validationError)
+        }
+      }
+
       return false
     }
 
-    // If validation succeeded and val_id is present, verify with SSLCommerz API
-    if (isValid && ipnData.val_id) {
-      try {
-        const validationResponse = await sslcommerz.validate({ val_id: ipnData.val_id })
-        if (validationResponse?.status !== 'VALID') {
-          console.error('SSLCommerz API validation failed:', validationResponse)
-          return false
-        }
-      } catch (validationError) {
-        console.error('SSLCommerz API validation error:', validationError)
-        // Continue with local validation result if API check fails
-      }
-    }
-
-    return isValid
+    return true
   } catch (error) {
     console.error('IPN validation error:', error)
     return false
