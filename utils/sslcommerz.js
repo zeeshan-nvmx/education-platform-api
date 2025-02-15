@@ -1,4 +1,5 @@
 // utils/sslcommerz.js
+
 const SSLCommerzPayment = require('sslcommerz-lts')
 const crypto = require('crypto')
 
@@ -34,33 +35,48 @@ exports.validateIPN = async (ipnData) => {
       return false
     }
 
-    // Get the ordered list of fields from verify_key
+    // Get ordered fields from verify_key
     const orderedFields = verify_key.split(',')
 
-    // Create verification string using the exact order from verify_key
-    const verificationString = orderedFields
-      .map((field) => {
-        // Handle undefined or null values as empty string
-        const value = ipnData[field] ?? ''
-        return `${field}=${value}`
-      })
-      .join('&')
+    // Create verification string with exact SSLCommerz format
+    let verificationString = ''
+    for (let i = 0; i < orderedFields.length; i++) {
+      const field = orderedFields[i]
+      const value = ipnData[field] === undefined ? '' : ipnData[field]
+
+      if (i === 0) {
+        verificationString += `${field}=${value}`
+      } else {
+        verificationString += `&${field}=${value}`
+      }
+    }
 
     // Add store password
     const finalString = `${verificationString}&store_passwd=${store_passwd}`
 
-    // Generate MD5 hash
-    const calculatedHash = crypto.createHash('md5').update(finalString).digest('hex')
+    // Log the final string for debugging
+    console.log('Verification string:', verificationString)
+    console.log('Final string with password:', finalString)
 
-    // Compare hashes
-    const isValidSignature = calculatedHash.toLowerCase() === verify_sign.toLowerCase()
+    // Generate both MD5 and SHA2 hashes
+    const calculatedMD5Hash = crypto.createHash('md5').update(finalString).digest('hex')
+    const calculatedSHA2Hash = crypto.createHash('sha256').update(finalString).digest('hex')
 
-    if (!isValidSignature) {
+    // Check both hashes
+    const isValidMD5 = calculatedMD5Hash.toLowerCase() === verify_sign.toLowerCase()
+    const isValidSHA2 = calculatedSHA2Hash.toLowerCase() === ipnData.verify_sign_sha2?.toLowerCase()
+
+    if (!isValidMD5 && !isValidSHA2) {
       console.error('IPN signature verification failed')
-      console.error('Calculated hash:', calculatedHash)
-      console.error('Received hash:', verify_sign)
+      console.error('Calculated MD5:', calculatedMD5Hash)
+      console.error('Received MD5:', verify_sign)
+      console.error('Calculated SHA2:', calculatedSHA2Hash)
+      console.error('Received SHA2:', ipnData.verify_sign_sha2)
       return false
     }
+
+    // Accept if either hash matches
+    const isValidSignature = isValidMD5 || isValidSHA2
 
     // For additional security, validate through SSLCommerz API if val_id is present
     if (ipnData.val_id) {
