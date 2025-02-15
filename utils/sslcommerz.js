@@ -1,5 +1,4 @@
 // utils/sslcommerz.js
-
 const SSLCommerzPayment = require('sslcommerz-lts')
 const crypto = require('crypto')
 
@@ -9,15 +8,12 @@ const is_live = process.env.SSLCOMMERZ_IS_LIVE === 'true'
 
 const sslcommerz = new SSLCommerzPayment(store_id, store_passwd, is_live)
 
-// Initialize payment with SSLCommerz
 exports.initiatePayment = async (data) => {
   try {
     const response = await sslcommerz.init(data)
-
     if (!response?.GatewayPageURL) {
       throw new Error('Failed to get payment URL from SSLCommerz')
     }
-
     return response
   } catch (error) {
     console.error('SSLCommerz payment initiation error:', error)
@@ -25,9 +21,10 @@ exports.initiatePayment = async (data) => {
   }
 }
 
-// Validate IPN signature and data
 exports.validateIPN = async (ipnData) => {
   try {
+    console.log('Validating IPN with data:', JSON.stringify(ipnData, null, 2))
+
     const { verify_sign, verify_key } = ipnData
 
     if (!verify_key) {
@@ -35,69 +32,61 @@ exports.validateIPN = async (ipnData) => {
       return false
     }
 
-    // Get ordered fields from verify_key
-    const orderedFields = verify_key.split(',')
+    // Create a normalized copy of the data
+    const normalizedData = { ...ipnData }
+    delete normalizedData.verify_sign
+    delete normalizedData.verify_key
+    delete normalizedData.verify_sign_sha2
 
-    // Create verification string with exact SSLCommerz format
-    let verificationString = ''
-    for (let i = 0; i < orderedFields.length; i++) {
-      const field = orderedFields[i]
-      const value = ipnData[field] === undefined ? '' : ipnData[field]
-
-      if (i === 0) {
-        verificationString += `${field}=${value}`
-      } else {
-        verificationString += `&${field}=${value}`
-      }
-    }
+    // Build verification string using all received fields
+    const verificationString = verify_key
+      .split(',')
+      .map((field) => `${field}=${normalizedData[field] || ''}`)
+      .join('&')
 
     // Add store password
     const finalString = `${verificationString}&store_passwd=${store_passwd}`
 
-    // Log the final string for debugging
-    console.log('Verification string:', verificationString)
-    console.log('Final string with password:', finalString)
+    // Log verification details for debugging
+    console.log('Final verification string:', finalString)
 
-    // Generate both MD5 and SHA2 hashes
-    const calculatedMD5Hash = crypto.createHash('md5').update(finalString).digest('hex')
-    const calculatedSHA2Hash = crypto.createHash('sha256').update(finalString).digest('hex')
+    // Calculate MD5 hash
+    const calculatedHash = crypto.createHash('md5').update(finalString).digest('hex')
 
-    // Check both hashes
-    const isValidMD5 = calculatedMD5Hash.toLowerCase() === verify_sign.toLowerCase()
-    const isValidSHA2 = calculatedSHA2Hash.toLowerCase() === ipnData.verify_sign_sha2?.toLowerCase()
+    // Log hash comparison
+    console.log('Calculated hash:', calculatedHash)
+    console.log('Received hash:', verify_sign)
 
-    if (!isValidMD5 && !isValidSHA2) {
-      console.error('IPN signature verification failed')
-      console.error('Calculated MD5:', calculatedMD5Hash)
-      console.error('Received MD5:', verify_sign)
-      console.error('Calculated SHA2:', calculatedSHA2Hash)
-      console.error('Received SHA2:', ipnData.verify_sign_sha2)
+    // Compare hashes
+    const isValid = calculatedHash.toLowerCase() === verify_sign.toLowerCase()
+
+    if (!isValid) {
+      console.error('Hash verification failed')
       return false
     }
 
-    // Accept if either hash matches
-    const isValidSignature = isValidMD5 || isValidSHA2
-
-    // For additional security, validate through SSLCommerz API if val_id is present
-    if (ipnData.val_id) {
+    // If validation succeeded and val_id is present, verify with SSLCommerz API
+    if (isValid && ipnData.val_id) {
       try {
         const validationResponse = await sslcommerz.validate({ val_id: ipnData.val_id })
-        return validationResponse?.status === 'VALID'
+        if (validationResponse?.status !== 'VALID') {
+          console.error('SSLCommerz API validation failed:', validationResponse)
+          return false
+        }
       } catch (validationError) {
-        console.error('SSLCommerz validation API error:', validationError)
-        // If API validation fails, still accept if signature is valid
-        return isValidSignature
+        console.error('SSLCommerz API validation error:', validationError)
+        // Continue with local validation result if API check fails
       }
     }
 
-    return isValidSignature
+    return isValid
   } catch (error) {
-    console.error('SSLCommerz IPN validation error:', error)
+    console.error('IPN validation error:', error)
     return false
   }
 }
 
-// Validate payment with SSLCommerz
+// Additional SSLCommerz utility functions
 exports.validatePayment = async ({ val_id }) => {
   try {
     const response = await sslcommerz.validate({ val_id })
@@ -108,7 +97,6 @@ exports.validatePayment = async ({ val_id }) => {
   }
 }
 
-// Initiate refund with SSLCommerz
 exports.initiateRefund = async ({ refund_amount, trans_id, reason }) => {
   try {
     const response = await sslcommerz.initiateRefund({
@@ -123,7 +111,6 @@ exports.initiateRefund = async ({ refund_amount, trans_id, reason }) => {
   }
 }
 
-// Check refund status with SSLCommerz
 exports.checkRefundStatus = async ({ refund_ref_id }) => {
   try {
     const response = await sslcommerz.refundQuery({
@@ -136,7 +123,6 @@ exports.checkRefundStatus = async ({ refund_ref_id }) => {
   }
 }
 
-// Transaction Query by Transaction ID
 exports.queryTransaction = async ({ trans_id }) => {
   try {
     const response = await sslcommerz.transactionQueryByTransactionId({
@@ -149,7 +135,6 @@ exports.queryTransaction = async ({ trans_id }) => {
   }
 }
 
-// Transaction Query by Session ID
 exports.queryTransactionBySession = async ({ sessionkey }) => {
   try {
     const response = await sslcommerz.transactionQueryBySessionId({
