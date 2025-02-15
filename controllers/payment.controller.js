@@ -37,20 +37,24 @@ const ipnValidationSchema = Joi.object({
   tran_id: Joi.string().required(),
   val_id: Joi.string().required(),
   amount: Joi.string().required(),
-  card_type: Joi.string(),
-  store_amount: Joi.string(),
-  card_no: Joi.string(),
-  bank_tran_id: Joi.string(),
+  card_type: Joi.string().allow('', null),
+  store_amount: Joi.string().allow('', null),
+  card_no: Joi.string().allow('', null),
+  bank_tran_id: Joi.string().allow('', null),
   status: Joi.string().required(),
-  tran_date: Joi.string(),
-  currency: Joi.string(),
-  card_issuer: Joi.string(),
-  card_brand: Joi.string(),
-  risk_level: Joi.string(),
-  risk_title: Joi.string(),
+  tran_date: Joi.string().allow('', null),
+  currency: Joi.string().allow('', null),
+  card_issuer: Joi.string().allow('', null),
+  card_brand: Joi.string().allow('', null),
+  risk_level: Joi.string().allow('', null),
+  risk_title: Joi.string().allow('', null),
   verify_sign: Joi.string().required(),
   verify_key: Joi.string().required(),
-}).options({ abortEarly: false, stripUnknown: true })
+}).options({ 
+  abortEarly: false, 
+  stripUnknown: true,
+  allowUnknown: true // Allow additional fields from SSLCommerz
+})
 
 // Helper functions
 async function calculateDiscountedAmount(amount, discountCode, courseId, moduleId = null) {
@@ -71,7 +75,9 @@ async function calculateDiscountedAmount(amount, discountCode, courseId, moduleI
 
   if (!discount) return { discountedAmount: amount, discount: null }
 
-  const discountAmount = discount.type === 'percentage' ? (amount * discount.value) / 100 : discount.value
+  const discountAmount = discount.type === 'percentage' 
+    ? (amount * discount.value) / 100 
+    : discount.value
 
   return {
     discountedAmount: Math.max(0, amount - discountAmount),
@@ -97,8 +103,12 @@ async function verifyAccess(userId, courseId, moduleIds = []) {
   }
 
   if (moduleIds.length > 0) {
-    const enrolledModuleIds = enrolledCourse.enrolledModules.map((em) => em.module.toString())
-    return !moduleIds.some((moduleId) => enrolledModuleIds.includes(moduleId.toString()))
+    const enrolledModuleIds = enrolledCourse.enrolledModules.map(
+      (em) => em.module.toString()
+    )
+    return !moduleIds.some(
+      (moduleId) => enrolledModuleIds.includes(moduleId.toString())
+    )
   }
 
   return true
@@ -110,7 +120,9 @@ async function processEnrollment(userId, courseId, purchaseType, moduleIds = [],
     throw new AppError('User not found', 404)
   }
 
-  const existingEnrollment = user.enrolledCourses.find((ec) => ec.course.toString() === courseId)
+  const existingEnrollment = user.enrolledCourses.find(
+    (ec) => ec.course.toString() === courseId
+  )
 
   if (purchaseType === 'course') {
     if (existingEnrollment) {
@@ -131,7 +143,9 @@ async function processEnrollment(userId, courseId, purchaseType, moduleIds = [],
 
     if (existingEnrollment) {
       moduleIds.forEach((moduleId) => {
-        if (!existingEnrollment.enrolledModules.some((em) => em.module.toString() === moduleId.toString())) {
+        if (!existingEnrollment.enrolledModules.some(
+          (em) => em.module.toString() === moduleId.toString()
+        )) {
           existingEnrollment.enrolledModules.push({
             module: moduleId,
             enrolledAt: new Date(),
