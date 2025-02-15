@@ -210,9 +210,9 @@ exports.initiateCoursePayment = async (req, res, next) => {
       total_amount: discountedAmount,
       currency: 'BDT',
       tran_id: transactionId,
-      success_url: `${value.redirectUrl}?status=success`,
-      fail_url: `${value.redirectUrl}?status=fail`,
-      cancel_url: `${value.redirectUrl}?status=cancel`,
+      success_url: `${value.redirectUrl}/success`,
+      fail_url: `${value.redirectUrl}/fail`,
+      cancel_url: `${value.redirectUrl}/cancel`,
       product_name: course.title,
       product_category: 'Course',
       product_profile: 'non-physical-goods',
@@ -272,6 +272,7 @@ exports.initiateCoursePayment = async (req, res, next) => {
 
     res.status(200).json({
       status: 'success',
+      message: 'Payment initialized successfully',
       data: {
         transactionId,
         amount: discountedAmount,
