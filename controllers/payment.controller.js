@@ -1,4 +1,4 @@
-// payment.controller.js - Part 1: Schemas and Helpers
+// payment.controller.js
 const Joi = require('joi')
 const mongoose = require('mongoose')
 const { Payment, Course, Module, User, Discount } = require('../models')

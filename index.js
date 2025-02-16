@@ -47,6 +47,7 @@ app.use(mongoSanitize())
 app.use(xss())
 app.use(hpp())
 app.use(compression())
+app.set('trust proxy', 1)
 app.use('/api', apiLimiter)
 
 // Verbose Request Logging with Sensitive Data Filtering
