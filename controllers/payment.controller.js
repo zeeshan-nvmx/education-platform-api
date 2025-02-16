@@ -108,19 +108,83 @@ async function verifyAccess(userId, courseId, moduleIds = []) {
   return true
 }
 
+// async function processEnrollment(userId, courseId, purchaseType, moduleIds = [], session) {
+//   const user = await User.findById(userId).session(session)
+//   if (!user) {
+//     throw new AppError('User not found', 404)
+//   }
+
+//   const existingEnrollment = user.enrolledCourses.find((ec) => ec.course.toString() === courseId)
+
+//   if (purchaseType === 'course') {
+//     if (existingEnrollment) {
+//       existingEnrollment.enrollmentType = 'full'
+//       existingEnrollment.enrolledModules = []
+//     } else {
+//       user.enrolledCourses.push({
+//         course: courseId,
+//         enrollmentType: 'full',
+//         enrolledAt: new Date(),
+//         enrolledModules: [],
+//       })
+//     }
+//   } else {
+//     if (!moduleIds.length) {
+//       throw new AppError('No modules specified for module purchase', 400)
+//     }
+
+//     if (existingEnrollment) {
+//       moduleIds.forEach((moduleId) => {
+//         if (!existingEnrollment.enrolledModules.some((em) => em.module.toString() === moduleId.toString())) {
+//           existingEnrollment.enrolledModules.push({
+//             module: moduleId,
+//             enrolledAt: new Date(),
+//             completedLessons: [],
+//             completedQuizzes: [],
+//             lastAccessed: new Date(),
+//           })
+//         }
+//       })
+//     } else {
+//       user.enrolledCourses.push({
+//         course: courseId,
+//         enrollmentType: 'module',
+//         enrolledAt: new Date(),
+//         enrolledModules: moduleIds.map((moduleId) => ({
+//           module: moduleId,
+//           enrolledAt: new Date(),
+//           completedLessons: [],
+//           completedQuizzes: [],
+//           lastAccessed: new Date(),
+//         })),
+//       })
+//     }
+//   }
+
+//   await user.save({ session })
+//   return user
+// }
+
 async function processEnrollment(userId, courseId, purchaseType, moduleIds = [], session) {
   const user = await User.findById(userId).session(session)
   if (!user) {
     throw new AppError('User not found', 404)
   }
 
+  // Find existing course enrollment
   const existingEnrollment = user.enrolledCourses.find((ec) => ec.course.toString() === courseId)
 
   if (purchaseType === 'course') {
+    // Handle full course enrollment
     if (existingEnrollment) {
+      if (existingEnrollment.enrollmentType === 'full') {
+        throw new AppError('Already enrolled in this course', 400)
+      }
+      // Upgrade from module to full access
       existingEnrollment.enrollmentType = 'full'
       existingEnrollment.enrolledModules = []
     } else {
+      // Create new full course enrollment
       user.enrolledCourses.push({
         course: courseId,
         enrollmentType: 'full',
@@ -129,23 +193,48 @@ async function processEnrollment(userId, courseId, purchaseType, moduleIds = [],
       })
     }
   } else {
+    // Handle module enrollment
     if (!moduleIds.length) {
       throw new AppError('No modules specified for module purchase', 400)
     }
 
+    // Validate all modules exist and belong to the course
+    const modules = await Module.find({
+      _id: { $in: moduleIds },
+      course: courseId,
+      isDeleted: false,
+    }).session(session)
+
+    if (modules.length !== moduleIds.length) {
+      throw new AppError('One or more modules not found or do not belong to this course', 404)
+    }
+
     if (existingEnrollment) {
-      moduleIds.forEach((moduleId) => {
-        if (!existingEnrollment.enrolledModules.some((em) => em.module.toString() === moduleId.toString())) {
-          existingEnrollment.enrolledModules.push({
-            module: moduleId,
-            enrolledAt: new Date(),
-            completedLessons: [],
-            completedQuizzes: [],
-            lastAccessed: new Date(),
-          })
-        }
+      // Check existing enrollment type
+      if (existingEnrollment.enrollmentType === 'full') {
+        throw new AppError('Already have full access to this course', 400)
+      }
+
+      // Check for duplicate module enrollments
+      const existingModuleIds = existingEnrollment.enrolledModules.map((em) => em.module.toString())
+      const newModuleIds = moduleIds.filter((moduleId) => !existingModuleIds.includes(moduleId.toString()))
+
+      if (!newModuleIds.length) {
+        throw new AppError('Already enrolled in all specified modules', 400)
+      }
+
+      // Add new modules to existing enrollment
+      newModuleIds.forEach((moduleId) => {
+        existingEnrollment.enrolledModules.push({
+          module: moduleId,
+          enrolledAt: new Date(),
+          completedLessons: [],
+          completedQuizzes: [],
+          lastAccessed: new Date(),
+        })
       })
     } else {
+      // Create new module-based enrollment
       user.enrolledCourses.push({
         course: courseId,
         enrollmentType: 'module',
@@ -422,71 +511,130 @@ exports.initiateModulePayment = async (req, res, next) => {
   }
 }
 
-// exports.handlePaymentRedirect = async (req, res, next) => {
-//   try {
-//     console.log('Payment redirect data:', req.body)
-//     const { status, tran_id, val_id } = req.body
+exports.handlePaymentRedirect = async (req, res, next) => {
+  const session = await mongoose.startSession()
+  session.startTransaction()
 
-//     // Find the payment record
-//     const payment = await Payment.findOne({ transactionId: tran_id })
+  try {
+    const { status, tran_id, val_id } = req.body
 
-//     if (!payment) {
-//       console.error('Payment not found for transaction:', tran_id)
-//       return res.redirect(`${process.env.FRONTEND_URL}/payment/verify-payment/error?message=invalid_transaction`)
-//     }
+    const payment = await Payment.findOne({
+      transactionId: tran_id,
+      status: { $in: ['pending', 'processing'] },
+    }).session(session)
 
-//     // Store the redirect response and update redirect status
-//     let redirectStatus
-//     switch (status?.toUpperCase()) {
-//       case 'VALID':
-//         redirectStatus = 'success'
-//         break
-//       case 'FAILED':
-//         redirectStatus = 'failed'
-//         break
-//       case 'CANCELLED':
-//         redirectStatus = 'cancelled'
-//         break
-//       default:
-//         redirectStatus = 'failed'
-//     }
+    if (!payment) {
+      console.error('Payment not found for transaction:', tran_id)
+      await session.abortTransaction()
+      return res.redirect(`${process.env.FRONTEND_URL}/payment/verify-payment/error?message=invalid_transaction`)
+    }
 
-//     await Payment.updateOne(
-//       { transactionId: tran_id },
-//       {
-//         $set: {
-//           redirectResponse: req.body,
-//           redirectStatus,
-//           updatedAt: new Date(),
-//         },
-//       }
-//     )
+    // Verify course exists
+    const course = await Course.findOne({
+      _id: payment.course,
+      isDeleted: false,
+    }).session(session)
 
-//     // Handle different status cases for redirect
-//     let redirectUrl = process.env.FRONTEND_URL
-//     switch (redirectStatus) {
-//       case 'success':
-//         redirectUrl += `/payment/verify-payment/success?tran_id=${tran_id}&val_id=${val_id}`
-//         break
-//       case 'failed':
-//         redirectUrl += `/payment/verify-payment/failed?tran_id=${tran_id}`
-//         break
-//       case 'cancelled':
-//         redirectUrl += `/payment/verify-payment/cancelled?tran_id=${tran_id}`
-//         break
-//       default:
-//         redirectUrl += `/payment/verify-payment/error?message=invalid_status`
-//     }
+    if (!course) {
+      console.error('Course not found:', payment.course)
+      await session.abortTransaction()
+      return res.redirect(`${process.env.FRONTEND_URL}/payment/verify-payment/error?message=course_not_found`)
+    }
 
-//     // Add amount to the redirect URL
-//     redirectUrl += `&amount=${payment.amount}`
+    let redirectStatus
+    switch (status?.toUpperCase()) {
+      case 'VALID':
+        redirectStatus = 'success'
+        if (redirectStatus === 'success') {
+          try {
+            // Process enrollment
+            await processEnrollment(payment.user, payment.course, payment.purchaseType, payment.modules || [], session)
 
-//     res.redirect(redirectUrl)
-//   } catch (error) {
-//     console.error('Payment redirect handling error:', error)
-//     res.redirect(`${process.env.FRONTEND_URL}/payment/verify-payment/error?message=server_error`)
-//   }
-// }
+            // Update payment status
+            payment.status = 'completed'
+            payment.completedAt = new Date()
+            await payment.save({ session })
+
+            // Update course total students if this is their first enrollment
+            const existingEnrollment = await User.findOne({
+              _id: payment.user,
+              'enrolledCourses.course': payment.course,
+            }).session(session)
+
+            if (!existingEnrollment) {
+              await Course.updateOne({ _id: payment.course }, { $inc: { totalStudents: 1 } }, { session })
+            }
+
+            // Update discount usage if applicable
+            if (payment.discount) {
+              await Discount.updateOne({ _id: payment.discount }, { $inc: { usedCount: 1 } }, { session })
+            }
+          } catch (enrollmentError) {
+            console.error('Enrollment processing error:', enrollmentError)
+            redirectStatus = 'failed'
+            payment.status = 'failed'
+            payment.failureReason = enrollmentError.message
+            await payment.save({ session })
+          }
+        }
+        break
+      case 'FAILED':
+        redirectStatus = 'failed'
+        payment.status = 'failed'
+        await payment.save({ session })
+        break
+      case 'CANCELLED':
+        redirectStatus = 'cancelled'
+        payment.status = 'cancelled'
+        await payment.save({ session })
+        break
+      default:
+        redirectStatus = 'failed'
+        payment.status = 'failed'
+        await payment.save({ session })
+    }
+
+    // Store the redirect response
+    await Payment.updateOne(
+      { transactionId: tran_id },
+      {
+        $set: {
+          redirectResponse: req.body,
+          redirectStatus,
+          updatedAt: new Date(),
+        },
+      },
+      { session }
+    )
+
+    await session.commitTransaction()
+
+    // Construct redirect URL
+    let redirectUrl = process.env.FRONTEND_URL
+    switch (redirectStatus) {
+      case 'success':
+        redirectUrl += `/payment/verify-payment/success?tran_id=${tran_id}&val_id=${val_id}`
+        break
+      case 'failed':
+        redirectUrl += `/payment/verify-payment/failed?tran_id=${tran_id}`
+        break
+      case 'cancelled':
+        redirectUrl += `/payment/verify-payment/cancelled?tran_id=${tran_id}`
+        break
+      default:
+        redirectUrl += `/payment/verify-payment/error?message=invalid_status`
+    }
+
+    redirectUrl += `&amount=${payment.amount}`
+    res.redirect(redirectUrl)
+  } catch (error) {
+    console.error('Payment redirect handling error:', error)
+    await session.abortTransaction()
+    res.redirect(`${process.env.FRONTEND_URL}/payment/verify-payment/error?message=server_error`)
+  } finally {
+    session.endSession()
+  }
+}
 
 // exports.handleIPN = async (req, res, next) => {
 //   const session = await mongoose.startSession()
@@ -608,111 +756,111 @@ exports.initiateModulePayment = async (req, res, next) => {
 //   }
 // }
 
-exports.handlePaymentRedirect = async (req, res, next) => {
-  const session = await mongoose.startSession()
-  session.startTransaction()
+// exports.handlePaymentRedirect = async (req, res, next) => {
+//   const session = await mongoose.startSession()
+//   session.startTransaction()
 
-  try {
-    const { status, tran_id, val_id } = req.body
+//   try {
+//     const { status, tran_id, val_id } = req.body
 
-    // Find the payment record
-    const payment = await Payment.findOne({
-      transactionId: tran_id,
-      status: { $in: ['pending', 'processing'] },
-    }).session(session)
+//     // Find the payment record
+//     const payment = await Payment.findOne({
+//       transactionId: tran_id,
+//       status: { $in: ['pending', 'processing'] },
+//     }).session(session)
 
-    if (!payment) {
-      console.error('Payment not found for transaction:', tran_id)
-      await session.abortTransaction()
-      return res.redirect(`${process.env.FRONTEND_URL}/payment/verify-payment/error?message=invalid_transaction`)
-    }
+//     if (!payment) {
+//       console.error('Payment not found for transaction:', tran_id)
+//       await session.abortTransaction()
+//       return res.redirect(`${process.env.FRONTEND_URL}/payment/verify-payment/error?message=invalid_transaction`)
+//     }
 
-    // Determine redirect status
-    let redirectStatus
-    switch (status?.toUpperCase()) {
-      case 'VALID':
-        redirectStatus = 'success'
-        // Process enrollment immediately for successful payments
-        if (redirectStatus === 'success') {
-          try {
-            await processEnrollment(payment.user, payment.course, payment.purchaseType, payment.modules || [], session)
+//     // Determine redirect status
+//     let redirectStatus
+//     switch (status?.toUpperCase()) {
+//       case 'VALID':
+//         redirectStatus = 'success'
+//         // Process enrollment immediately for successful payments
+//         if (redirectStatus === 'success') {
+//           try {
+//             await processEnrollment(payment.user, payment.course, payment.purchaseType, payment.modules || [], session)
 
-            // Update payment status
-            payment.status = 'completed'
-            payment.completedAt = new Date()
-            await payment.save({ session })
+//             // Update payment status
+//             payment.status = 'completed'
+//             payment.completedAt = new Date()
+//             await payment.save({ session })
 
-            // Update course total students if needed
-            const existingEnrollment = await User.findOne({
-              _id: payment.user,
-              'enrolledCourses.course': payment.course,
-            }).session(session)
+//             // Update course total students if needed
+//             const existingEnrollment = await User.findOne({
+//               _id: payment.user,
+//               'enrolledCourses.course': payment.course,
+//             }).session(session)
 
-            if (!existingEnrollment) {
-              await Course.updateOne({ _id: payment.course }, { $inc: { totalStudents: 1 } }, { session })
-            }
+//             if (!existingEnrollment) {
+//               await Course.updateOne({ _id: payment.course }, { $inc: { totalStudents: 1 } }, { session })
+//             }
 
-            // Update discount usage if applicable
-            if (payment.discount) {
-              await Discount.updateOne({ _id: payment.discount }, { $inc: { usedCount: 1 } }, { session })
-            }
-          } catch (enrollmentError) {
-            console.error('Enrollment processing error:', enrollmentError)
-            redirectStatus = 'failed'
-          }
-        }
-        break
-      case 'FAILED':
-        redirectStatus = 'failed'
-        break
-      case 'CANCELLED':
-        redirectStatus = 'cancelled'
-        break
-      default:
-        redirectStatus = 'failed'
-    }
+//             // Update discount usage if applicable
+//             if (payment.discount) {
+//               await Discount.updateOne({ _id: payment.discount }, { $inc: { usedCount: 1 } }, { session })
+//             }
+//           } catch (enrollmentError) {
+//             console.error('Enrollment processing error:', enrollmentError)
+//             redirectStatus = 'failed'
+//           }
+//         }
+//         break
+//       case 'FAILED':
+//         redirectStatus = 'failed'
+//         break
+//       case 'CANCELLED':
+//         redirectStatus = 'cancelled'
+//         break
+//       default:
+//         redirectStatus = 'failed'
+//     }
 
-    // Update payment with redirect response
-    await Payment.updateOne(
-      { transactionId: tran_id },
-      {
-        $set: {
-          redirectResponse: req.body,
-          redirectStatus,
-          updatedAt: new Date(),
-        },
-      },
-      { session }
-    )
+//     // Update payment with redirect response
+//     await Payment.updateOne(
+//       { transactionId: tran_id },
+//       {
+//         $set: {
+//           redirectResponse: req.body,
+//           redirectStatus,
+//           updatedAt: new Date(),
+//         },
+//       },
+//       { session }
+//     )
 
-    await session.commitTransaction()
+//     await session.commitTransaction()
 
-    // Handle different status cases for redirect
-    let redirectUrl = process.env.FRONTEND_URL
-    switch (redirectStatus) {
-      case 'success':
-        redirectUrl += `/payment/verify-payment/success?tran_id=${tran_id}&val_id=${val_id}`
-        break
-      case 'failed':
-        redirectUrl += `/payment/verify-payment/failed?tran_id=${tran_id}`
-        break
-      case 'cancelled':
-        redirectUrl += `/payment/verify-payment/cancelled?tran_id=${tran_id}`
-        break
-      default:
-        redirectUrl += `/payment/verify-payment/error?message=invalid_status`
-    }
+//     // Handle different status cases for redirect
+//     let redirectUrl = process.env.FRONTEND_URL
+//     switch (redirectStatus) {
+//       case 'success':
+//         redirectUrl += `/payment/verify-payment/success?tran_id=${tran_id}&val_id=${val_id}`
+//         break
+//       case 'failed':
+//         redirectUrl += `/payment/verify-payment/failed?tran_id=${tran_id}`
+//         break
+//       case 'cancelled':
+//         redirectUrl += `/payment/verify-payment/cancelled?tran_id=${tran_id}`
+//         break
+//       default:
+//         redirectUrl += `/payment/verify-payment/error?message=invalid_status`
+//     }
 
-    redirectUrl += `&amount=${payment.amount}`
-    res.redirect(redirectUrl)
-  } catch (error) {
-    console.error('Payment redirect handling error:', error)
-    await session.abortTransaction()
-    res.redirect(`${process.env.FRONTEND_URL}/payment/verify-payment/error?message=server_error`)
-  } finally {
-    session.endSession()
-  }
-}
+//     redirectUrl += `&amount=${payment.amount}`
+//     res.redirect(redirectUrl)
+//   } catch (error) {
+//     console.error('Payment redirect handling error:', error)
+//     await session.abortTransaction()
+//     res.redirect(`${process.env.FRONTEND_URL}/payment/verify-payment/error?message=server_error`)
+//   } finally {
+//     session.endSession()
+//   }
+// }
 
 exports.handleIPN = async (req, res, next) => {
   const session = await mongoose.startSession()
