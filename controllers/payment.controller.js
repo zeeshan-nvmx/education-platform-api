@@ -425,7 +425,6 @@ exports.initiateModulePayment = async (req, res, next) => {
 // exports.handlePaymentRedirect = async (req, res, next) => {
 //   try {
 //     console.log('Payment redirect data:', req.body)
-
 //     const { status, tran_id, val_id } = req.body
 
 //     // Find the payment record
@@ -436,38 +435,50 @@ exports.initiateModulePayment = async (req, res, next) => {
 //       return res.redirect(`${process.env.FRONTEND_URL}/payment/verify-payment/error?message=invalid_transaction`)
 //     }
 
-//     // Store the redirect response
+//     // Store the redirect response and update redirect status
+//     let redirectStatus
+//     switch (status?.toUpperCase()) {
+//       case 'VALID':
+//         redirectStatus = 'success'
+//         break
+//       case 'FAILED':
+//         redirectStatus = 'failed'
+//         break
+//       case 'CANCELLED':
+//         redirectStatus = 'cancelled'
+//         break
+//       default:
+//         redirectStatus = 'failed'
+//     }
+
 //     await Payment.updateOne(
 //       { transactionId: tran_id },
 //       {
 //         $set: {
-//           redirectResponse: req.query,
+//           redirectResponse: req.body,
+//           redirectStatus,
 //           updatedAt: new Date(),
 //         },
 //       }
 //     )
 
-//     // Handle different status cases
+//     // Handle different status cases for redirect
 //     let redirectUrl = process.env.FRONTEND_URL
-
-//     switch (status?.toUpperCase()) {
-//       case 'VALID':
+//     switch (redirectStatus) {
+//       case 'success':
 //         redirectUrl += `/payment/verify-payment/success?tran_id=${tran_id}&val_id=${val_id}`
 //         break
-
-//       case 'FAILED':
+//       case 'failed':
 //         redirectUrl += `/payment/verify-payment/failed?tran_id=${tran_id}`
 //         break
-
-//       case 'CANCELLED':
+//       case 'cancelled':
 //         redirectUrl += `/payment/verify-payment/cancelled?tran_id=${tran_id}`
 //         break
-
 //       default:
 //         redirectUrl += `/payment/verify-payment/error?message=invalid_status`
 //     }
 
-//     // Add any additional query parameters you want to pass to frontend
+//     // Add amount to the redirect URL
 //     redirectUrl += `&amount=${payment.amount}`
 
 //     res.redirect(redirectUrl)
@@ -478,7 +489,6 @@ exports.initiateModulePayment = async (req, res, next) => {
 // }
 
 // exports.handleIPN = async (req, res, next) => {
-  
 //   const session = await mongoose.startSession()
 //   session.startTransaction()
 
@@ -489,7 +499,6 @@ exports.initiateModulePayment = async (req, res, next) => {
 //     if (error) {
 //       console.error('IPN validation error:', error.details)
 //       return res.status(200).json({
-//         // Always return 200 for IPN
 //         status: 'error',
 //         message: 'Invalid IPN data',
 //       })
@@ -507,19 +516,27 @@ exports.initiateModulePayment = async (req, res, next) => {
 
 //     const { tran_id, status, amount, bank_tran_id, card_type } = value
 
+//     // Find payment and check if it's already processed
 //     const payment = await Payment.findOne({
 //       transactionId: tran_id,
-//       status: 'pending',
+//       status: { $in: ['pending', 'processing'] },
 //     }).session(session)
 
 //     if (!payment) {
-//       console.error('Payment not found:', tran_id)
+//       console.error('Payment not found or already processed:', tran_id)
 //       await session.abortTransaction()
-//       return res.status(200).json({ status: 'error', message: 'Invalid transaction' })
+//       return res.status(200).json({ status: 'error', message: 'Invalid transaction or already processed' })
+//     }
+
+//     // Update payment status to processing if still pending
+//     if (payment.status === 'pending') {
+//       payment.status = 'processing'
+//       await payment.save({ session })
 //     }
 
 //     // Store the raw IPN response
 //     payment.ipnResponse = req.body
+//     payment.ipnStatus = status === 'VALID' ? 'success' : 'failed'
 
 //     if (status !== 'VALID') {
 //       console.log('Payment status not valid:', status)
@@ -535,7 +552,6 @@ exports.initiateModulePayment = async (req, res, next) => {
 //     const receivedAmount = parseFloat(amount)
 
 //     if (Math.abs(receivedAmount - expectedAmount) > 0.01) {
-//       // Using small epsilon for float comparison
 //       console.error('Amount mismatch:', { expected: expectedAmount, received: receivedAmount })
 //       payment.status = 'failed'
 //       payment.failureReason = 'Amount mismatch'
@@ -545,29 +561,31 @@ exports.initiateModulePayment = async (req, res, next) => {
 //     }
 
 //     try {
-//       // Process enrollment
-//       await processEnrollment(payment.user, payment.course, payment.purchaseType, payment.modules || [], session)
+//       // Only process enrollment if both redirect and IPN are successful
+//       if (payment.redirectStatus === 'success') {
+//         await processEnrollment(payment.user, payment.course, payment.purchaseType, payment.modules || [], session)
 
-//       // Update payment status
-//       payment.status = 'completed'
-//       payment.completedAt = new Date()
-//       payment.bankTransactionId = bank_tran_id
-//       payment.paymentMethod = card_type
-//       await payment.save({ session })
+//         // Update payment status
+//         payment.status = 'completed'
+//         payment.completedAt = new Date()
+//         payment.bankTransactionId = bank_tran_id
+//         payment.paymentMethod = card_type
+//         await payment.save({ session })
 
-//       // Update course total students if needed
-//       const existingEnrollment = await User.findOne({
-//         _id: payment.user,
-//         'enrolledCourses.course': payment.course,
-//       }).session(session)
+//         // Update course total students if needed
+//         const existingEnrollment = await User.findOne({
+//           _id: payment.user,
+//           'enrolledCourses.course': payment.course,
+//         }).session(session)
 
-//       if (!existingEnrollment) {
-//         await Course.updateOne({ _id: payment.course }, { $inc: { totalStudents: 1 } }, { session })
-//       }
+//         if (!existingEnrollment) {
+//           await Course.updateOne({ _id: payment.course }, { $inc: { totalStudents: 1 } }, { session })
+//         }
 
-//       // Update discount usage if applicable
-//       if (payment.discount) {
-//         await Discount.updateOne({ _id: payment.discount }, { $inc: { usedCount: 1 } }, { session })
+//         // Update discount usage if applicable
+//         if (payment.discount) {
+//           await Discount.updateOne({ _id: payment.discount }, { $inc: { usedCount: 1 } }, { session })
+//         }
 //       }
 
 //       await session.commitTransaction()
@@ -590,26 +608,59 @@ exports.initiateModulePayment = async (req, res, next) => {
 //   }
 // }
 
-// Backup verification endpoint for when IPN fails
-
 exports.handlePaymentRedirect = async (req, res, next) => {
+  const session = await mongoose.startSession()
+  session.startTransaction()
+
   try {
-    console.log('Payment redirect data:', req.body)
     const { status, tran_id, val_id } = req.body
 
     // Find the payment record
-    const payment = await Payment.findOne({ transactionId: tran_id })
+    const payment = await Payment.findOne({
+      transactionId: tran_id,
+      status: { $in: ['pending', 'processing'] },
+    }).session(session)
 
     if (!payment) {
       console.error('Payment not found for transaction:', tran_id)
+      await session.abortTransaction()
       return res.redirect(`${process.env.FRONTEND_URL}/payment/verify-payment/error?message=invalid_transaction`)
     }
 
-    // Store the redirect response and update redirect status
+    // Determine redirect status
     let redirectStatus
     switch (status?.toUpperCase()) {
       case 'VALID':
         redirectStatus = 'success'
+        // Process enrollment immediately for successful payments
+        if (redirectStatus === 'success') {
+          try {
+            await processEnrollment(payment.user, payment.course, payment.purchaseType, payment.modules || [], session)
+
+            // Update payment status
+            payment.status = 'completed'
+            payment.completedAt = new Date()
+            await payment.save({ session })
+
+            // Update course total students if needed
+            const existingEnrollment = await User.findOne({
+              _id: payment.user,
+              'enrolledCourses.course': payment.course,
+            }).session(session)
+
+            if (!existingEnrollment) {
+              await Course.updateOne({ _id: payment.course }, { $inc: { totalStudents: 1 } }, { session })
+            }
+
+            // Update discount usage if applicable
+            if (payment.discount) {
+              await Discount.updateOne({ _id: payment.discount }, { $inc: { usedCount: 1 } }, { session })
+            }
+          } catch (enrollmentError) {
+            console.error('Enrollment processing error:', enrollmentError)
+            redirectStatus = 'failed'
+          }
+        }
         break
       case 'FAILED':
         redirectStatus = 'failed'
@@ -621,6 +672,7 @@ exports.handlePaymentRedirect = async (req, res, next) => {
         redirectStatus = 'failed'
     }
 
+    // Update payment with redirect response
     await Payment.updateOne(
       { transactionId: tran_id },
       {
@@ -629,8 +681,11 @@ exports.handlePaymentRedirect = async (req, res, next) => {
           redirectStatus,
           updatedAt: new Date(),
         },
-      }
+      },
+      { session }
     )
+
+    await session.commitTransaction()
 
     // Handle different status cases for redirect
     let redirectUrl = process.env.FRONTEND_URL
@@ -648,13 +703,14 @@ exports.handlePaymentRedirect = async (req, res, next) => {
         redirectUrl += `/payment/verify-payment/error?message=invalid_status`
     }
 
-    // Add amount to the redirect URL
     redirectUrl += `&amount=${payment.amount}`
-
     res.redirect(redirectUrl)
   } catch (error) {
     console.error('Payment redirect handling error:', error)
+    await session.abortTransaction()
     res.redirect(`${process.env.FRONTEND_URL}/payment/verify-payment/error?message=server_error`)
+  } finally {
+    session.endSession()
   }
 }
 
@@ -686,89 +742,26 @@ exports.handleIPN = async (req, res, next) => {
 
     const { tran_id, status, amount, bank_tran_id, card_type } = value
 
-    // Find payment and check if it's already processed
     const payment = await Payment.findOne({
       transactionId: tran_id,
-      status: { $in: ['pending', 'processing'] },
     }).session(session)
 
     if (!payment) {
-      console.error('Payment not found or already processed:', tran_id)
+      console.error('Payment not found:', tran_id)
       await session.abortTransaction()
-      return res.status(200).json({ status: 'error', message: 'Invalid transaction or already processed' })
+      return res.status(200).json({ status: 'error', message: 'Invalid transaction' })
     }
 
-    // Update payment status to processing if still pending
-    if (payment.status === 'pending') {
-      payment.status = 'processing'
-      await payment.save({ session })
-    }
-
-    // Store the raw IPN response
+    // Store the IPN response
     payment.ipnResponse = req.body
     payment.ipnStatus = status === 'VALID' ? 'success' : 'failed'
+    payment.bankTransactionId = bank_tran_id
+    payment.paymentMethod = card_type
 
-    if (status !== 'VALID') {
-      console.log('Payment status not valid:', status)
-      payment.status = 'failed'
-      payment.failureReason = `Invalid payment status: ${status}`
-      await payment.save({ session })
-      await session.commitTransaction()
-      return res.status(200).json({ status: 'success' })
-    }
+    await payment.save({ session })
+    await session.commitTransaction()
 
-    // Validate amount matches
-    const expectedAmount = payment.discountedAmount || payment.amount
-    const receivedAmount = parseFloat(amount)
-
-    if (Math.abs(receivedAmount - expectedAmount) > 0.01) {
-      console.error('Amount mismatch:', { expected: expectedAmount, received: receivedAmount })
-      payment.status = 'failed'
-      payment.failureReason = 'Amount mismatch'
-      await payment.save({ session })
-      await session.commitTransaction()
-      return res.status(200).json({ status: 'success' })
-    }
-
-    try {
-      // Only process enrollment if both redirect and IPN are successful
-      if (payment.redirectStatus === 'success') {
-        await processEnrollment(payment.user, payment.course, payment.purchaseType, payment.modules || [], session)
-
-        // Update payment status
-        payment.status = 'completed'
-        payment.completedAt = new Date()
-        payment.bankTransactionId = bank_tran_id
-        payment.paymentMethod = card_type
-        await payment.save({ session })
-
-        // Update course total students if needed
-        const existingEnrollment = await User.findOne({
-          _id: payment.user,
-          'enrolledCourses.course': payment.course,
-        }).session(session)
-
-        if (!existingEnrollment) {
-          await Course.updateOne({ _id: payment.course }, { $inc: { totalStudents: 1 } }, { session })
-        }
-
-        // Update discount usage if applicable
-        if (payment.discount) {
-          await Discount.updateOne({ _id: payment.discount }, { $inc: { usedCount: 1 } }, { session })
-        }
-      }
-
-      await session.commitTransaction()
-      return res.status(200).json({ status: 'success' })
-    } catch (enrollmentError) {
-      console.error('Enrollment processing error:', enrollmentError)
-      payment.status = 'failed'
-      payment.failureReason = 'Enrollment processing failed'
-      payment.ipnResponse.enrollmentError = enrollmentError.message
-      await payment.save({ session })
-      await session.abortTransaction()
-      return res.status(200).json({ status: 'error' })
-    }
+    return res.status(200).json({ status: 'success' })
   } catch (error) {
     console.error('IPN handling error:', error)
     await session.abortTransaction()
