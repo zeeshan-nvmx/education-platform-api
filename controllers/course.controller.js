@@ -33,6 +33,7 @@ const querySchema = Joi.object({
   page: Joi.number().integer().min(1),
   limit: Joi.number().integer().min(1).max(100),
   category: Joi.string(),
+  featured: Joi.string(),
   search: Joi.string(),
   minPrice: Joi.number().min(0),
   maxPrice: Joi.number().min(Joi.ref('minPrice')),
@@ -364,16 +365,258 @@ exports.getAllCourses = async (req, res, next) => {
   }
 }
 
+// exports.getCourse = async (req, res, next) => {
+//   try {
+    
+//     const course = await Course.findOne({
+//       _id: req.params.courseId,
+//     })
+//       .populate('creator', 'firstName lastName email')
+//       .populate({
+//         path: 'modules',
+//         select: 'title description order price prerequisites isAccessible dependencies',
+//         options: { sort: { order: 1 } },
+//         populate: {
+//           path: 'lessons',
+//           select: 'title description order videoUrl duration requireQuizPass completionRequirements quizSettings assets',
+//           options: { sort: { order: 1 } },
+//           populate: {
+//             path: 'quiz',
+//             select: 'title type passingScore duration maxAttempts',
+//           },
+//         },
+//       })
+//       .lean()
+
+//     if (!course) {
+//       return next(new AppError('Course not found', 404))
+//     }
+
+//     // Check for authenticated user, but ONLY fetch data if user is present.
+//     let authenticatedUser = null
+//     if (req.user && req.user._id) {
+      
+//       authenticatedUser = await User.findOne({ _id: req.user._id }, { enrolledCourses: 1, role: 1 }).lean()
+//     }
+
+//     // Determine roles and enrollment 
+//     const isCreator = authenticatedUser && course.creator && course.creator._id.toString() === authenticatedUser._id.toString()
+//     const isAdmin = authenticatedUser?.role === 'admin'
+
+//     let enrollment = null
+//     if (authenticatedUser?.enrolledCourses?.length) {
+//       enrollment = authenticatedUser.enrolledCourses.find((ec) => ec.course && ec.course.toString() === course._id.toString())
+//     }
+
+//     let creatorEmail = undefined
+//     if (isAdmin || isCreator) {
+//       creatorEmail = course.creator ? course.creator.email : undefined
+//     }
+
+//     const courseDetails = {
+//       _id: course._id,
+//       title: course.title || '',
+//       description: course.description || '',
+//       longDescription: course.longDescription || '',
+//       category: course.category || '',
+//       price: course.price || 0,
+//       thumbnail: course.thumbnail || '',
+//       rating: course.rating || 0,
+//       totalStudents: course.totalStudents || 0,
+//       featured: course.featured || false,
+//       creator: course.creator
+//         ? {
+//             name: `${course.creator.firstName || ''} ${course.creator.lastName || ''}`.trim(),
+//             email: creatorEmail, 
+//           }
+//         : { name: 'Unknown Creator' }, // Default if no creator
+//       instructors: Array.isArray(course.instructors)
+//         ? course.instructors.map((instructor) => ({
+//             name: instructor.name || '',
+//             description: instructor.description || '',
+//             designation: instructor.designation || '',
+//             image: instructor.image || '',
+//             expertise: Array.isArray(instructor.expertise) ? instructor.expertise : [],
+//             bio: instructor.bio || '',
+//             socialLinks: instructor.socialLinks || {},
+//           }))
+//         : [],
+//     }
+
+//     let moduleProgress = {}
+//     if (enrollment && authenticatedUser?._id) {
+//       const progress = await Progress.find({
+//         user: authenticatedUser._id,
+//         course: course._id,
+//       }).lean()
+
+//       moduleProgress = progress.reduce((acc, p) => {
+//         if (p && p.module) {
+//           acc[p.module.toString()] = p
+//         }
+//         return acc
+//       }, {})
+//     }
+
+//     const hasFullAccess = isCreator || isAdmin || (enrollment && enrollment.enrollmentType === 'full')
+
+//     const modules = Array.isArray(course.modules) ? course.modules : []
+//     courseDetails.modules = modules
+//       .map((module) => {
+//         if (!module) return null
+
+//         const moduleId = module._id.toString()
+//         const hasModuleAccess =
+//           hasFullAccess ||
+//           (enrollment && Array.isArray(enrollment.enrolledModules) && enrollment.enrolledModules.some((em) => em && em.module && em.module.toString() === moduleId))
+
+//         const moduleData = {
+//           _id: module._id,
+//           title: module.title || '',
+//           description: module.description || '',
+//           order: module.order || 0,
+//           price: module.price || 0,
+//           totalLessons: Array.isArray(module.lessons) ? module.lessons.length : 0,
+//         }
+
+//         if (hasModuleAccess) {
+//           moduleData.isAccessible = !!module.isAccessible
+//           moduleData.prerequisites = Array.isArray(module.prerequisites) ? module.prerequisites : []
+
+//           const currentProgress = moduleProgress[moduleId]
+//           if (currentProgress) {
+//             moduleData.progress = {
+//               completedLessons: Array.isArray(currentProgress.completedLessons) ? currentProgress.completedLessons.length : 0,
+//               completedQuizzes: Array.isArray(currentProgress.completedQuizzes) ? currentProgress.completedQuizzes.length : 0,
+//               progress: currentProgress.progress || 0,
+//               lastAccessed: currentProgress.lastAccessed || null,
+//             }
+//           }
+
+//           const lessons = Array.isArray(module.lessons) ? module.lessons : []
+//           moduleData.lessons = lessons
+//             .map((lesson) => {
+//               if (!lesson) return null
+
+//               const lessonData = {
+//                 _id: lesson._id,
+//                 title: lesson.title || '',
+//                 description: lesson.description || '',
+//                 order: lesson.order || 0,
+//                 duration: lesson.duration || 0,
+//                 requireQuizPass: !!lesson.requireQuizPass,
+//                 hasVideo: !!lesson.videoUrl,
+//                 totalAssets: Array.isArray(lesson.assets) ? lesson.assets.length : 0,
+//                 completionRequirements: {
+//                   watchVideo: !!lesson.completionRequirements?.watchVideo,
+//                   hasRequiredAssets:
+//                     Array.isArray(lesson.completionRequirements?.downloadAssets) && lesson.completionRequirements.downloadAssets.some((asset) => asset && asset.required),
+//                   minimumTimeSpent: lesson.completionRequirements?.minimumTimeSpent || 0,
+//                 },
+//               }
+
+//               if (lesson.quiz) {
+//                 lessonData.quiz = {
+//                   title: lesson.quiz.title || '',
+//                   type: lesson.quiz.type || '',
+//                   passingScore: lesson.quiz.passingScore || 0,
+//                   duration: lesson.quiz.duration || 0,
+//                   maxAttempts: lesson.quiz.maxAttempts || 0,
+//                   settings: {
+//                     required: !!lesson.quizSettings?.required,
+//                     minimumPassingScore: lesson.quizSettings?.minimumPassingScore || 70,
+//                     blockProgress: !!lesson.quizSettings?.blockProgress,
+//                     showQuizAt: lesson.quizSettings?.showQuizAt || 'after',
+//                     minimumTimeRequired: lesson.quizSettings?.minimumTimeRequired || 0,
+//                   },
+//                 }
+//               }
+
+//               if (currentProgress) {
+//                 lessonData.progress = {
+//                   completed: Array.isArray(currentProgress.completedLessons) && currentProgress.completedLessons.includes(lesson._id),
+//                   quizCompleted: lesson.quiz && Array.isArray(currentProgress.completedQuizzes) && currentProgress.completedQuizzes.includes(lesson.quiz._id),
+//                 }
+//               }
+
+//               return lessonData
+//             })
+//             .filter(Boolean)
+//         } else {
+//           const lessons = Array.isArray(module.lessons) ? module.lessons : []
+//           moduleData.lessons = lessons
+//             .map((lesson) => {
+//               if (!lesson) return null
+//               return {
+//                 _id: lesson._id,
+//                 title: lesson.title || '',
+//                 description: lesson.description || '',
+//                 order: lesson.order || 0,
+//                 duration: lesson.duration || 0,
+//                 hasQuiz: !!lesson.quiz,
+//                 hasVideo: !!lesson.videoUrl,
+//                 totalAssets: Array.isArray(lesson.assets) ? lesson.assets.length : 0,
+//               }
+//             })
+//             .filter(Boolean)
+//         }
+
+//         return moduleData
+//       })
+//       .filter(Boolean)
+
+//     if (enrollment) {
+//       courseDetails.enrollment = {
+//         type: enrollment.enrollmentType || 'module',
+//         enrolledAt: enrollment.enrolledAt || new Date(),
+//         enrolledModules: Array.isArray(enrollment.enrolledModules)
+//           ? enrollment.enrolledModules
+//               .map((em) => ({
+//                 moduleId: em?.module?.toString() || '',
+//                 enrolledAt: em?.enrolledAt || new Date(),
+//                 lastAccessed: em?.lastAccessed || new Date(),
+//               }))
+//               .filter((em) => em.moduleId)
+//           : [],
+//       }
+//     }
+
+//     courseDetails.statistics = {
+//       totalModules: courseDetails.modules.length,
+//       totalLessons: courseDetails.modules.reduce((acc, module) => acc + (Array.isArray(module.lessons) ? module.lessons.length : 0), 0),
+//       totalDuration: courseDetails.modules.reduce(
+//         (acc, module) => acc + (Array.isArray(module.lessons) ? module.lessons.reduce((sum, lesson) => sum + (lesson?.duration || 0), 0) : 0),
+//         0
+//       ),
+//       totalQuizzes: courseDetails.modules.reduce(
+//         (acc, module) => acc + (Array.isArray(module.lessons) ? module.lessons.reduce((sum, lesson) => sum + (lesson?.quiz ? 1 : 0), 0) : 0),
+//         0
+//       ),
+//     }
+
+//     res.status(200).json({
+//       message: 'Course fetched successfully',
+//       data: courseDetails,
+//     })
+//   } catch (error) {
+//     console.error('Error in getCourse:', error)
+//     next(error)
+//   }
+// }
+
 exports.getCourse = async (req, res, next) => {
   try {
-    
+    if (!mongoose.Types.ObjectId.isValid(req.params.courseId)) {
+      return next(new AppError('Invalid course ID', 400))
+    }
+
     const course = await Course.findOne({
       _id: req.params.courseId,
     })
       .populate('creator', 'firstName lastName email')
       .populate({
         path: 'modules',
-        select: 'title description order price prerequisites isAccessible dependencies',
+        select: 'title description order prerequisites isAccessible dependencies price',
         options: { sort: { order: 1 } },
         populate: {
           path: 'lessons',
@@ -391,25 +634,19 @@ exports.getCourse = async (req, res, next) => {
       return next(new AppError('Course not found', 404))
     }
 
-    // Check for authenticated user, but ONLY fetch data if user is present.
+    // Check for authenticated user
     let authenticatedUser = null
     if (req.user && req.user._id) {
-      
       authenticatedUser = await User.findOne({ _id: req.user._id }, { enrolledCourses: 1, role: 1 }).lean()
     }
 
-    // Determine roles and enrollment 
+    // Determine roles and enrollment
     const isCreator = authenticatedUser && course.creator && course.creator._id.toString() === authenticatedUser._id.toString()
     const isAdmin = authenticatedUser?.role === 'admin'
 
     let enrollment = null
     if (authenticatedUser?.enrolledCourses?.length) {
       enrollment = authenticatedUser.enrolledCourses.find((ec) => ec.course && ec.course.toString() === course._id.toString())
-    }
-
-    let creatorEmail = undefined
-    if (isAdmin || isCreator) {
-      creatorEmail = course.creator ? course.creator.email : undefined
     }
 
     const courseDetails = {
@@ -426,9 +663,9 @@ exports.getCourse = async (req, res, next) => {
       creator: course.creator
         ? {
             name: `${course.creator.firstName || ''} ${course.creator.lastName || ''}`.trim(),
-            email: creatorEmail, 
+            email: isAdmin || isCreator ? course.creator.email : undefined,
           }
-        : { name: 'Unknown Creator' }, // Default if no creator
+        : { name: 'Unknown Creator' },
       instructors: Array.isArray(course.instructors)
         ? course.instructors.map((instructor) => ({
             name: instructor.name || '',
@@ -474,24 +711,22 @@ exports.getCourse = async (req, res, next) => {
           title: module.title || '',
           description: module.description || '',
           order: module.order || 0,
-          price: module.price || 0,
           totalLessons: Array.isArray(module.lessons) ? module.lessons.length : 0,
+          isAccessible: !!module.isAccessible,
+          prerequisites: Array.isArray(module.prerequisites) ? module.prerequisites : [],
+        }
+
+        const currentProgress = moduleProgress[moduleId]
+        if (currentProgress) {
+          moduleData.progress = {
+            completedLessons: Array.isArray(currentProgress.completedLessons) ? currentProgress.completedLessons.length : 0,
+            completedQuizzes: Array.isArray(currentProgress.completedQuizzes) ? currentProgress.completedQuizzes.length : 0,
+            progress: currentProgress.progress || 0,
+            lastAccessed: currentProgress.lastAccessed || null,
+          }
         }
 
         if (hasModuleAccess) {
-          moduleData.isAccessible = !!module.isAccessible
-          moduleData.prerequisites = Array.isArray(module.prerequisites) ? module.prerequisites : []
-
-          const currentProgress = moduleProgress[moduleId]
-          if (currentProgress) {
-            moduleData.progress = {
-              completedLessons: Array.isArray(currentProgress.completedLessons) ? currentProgress.completedLessons.length : 0,
-              completedQuizzes: Array.isArray(currentProgress.completedQuizzes) ? currentProgress.completedQuizzes.length : 0,
-              progress: currentProgress.progress || 0,
-              lastAccessed: currentProgress.lastAccessed || null,
-            }
-          }
-
           const lessons = Array.isArray(module.lessons) ? module.lessons : []
           moduleData.lessons = lessons
             .map((lesson) => {
@@ -566,17 +801,9 @@ exports.getCourse = async (req, res, next) => {
 
     if (enrollment) {
       courseDetails.enrollment = {
-        type: enrollment.enrollmentType || 'module',
-        enrolledAt: enrollment.enrolledAt || new Date(),
-        enrolledModules: Array.isArray(enrollment.enrolledModules)
-          ? enrollment.enrolledModules
-              .map((em) => ({
-                moduleId: em?.module?.toString() || '',
-                enrolledAt: em?.enrolledAt || new Date(),
-                lastAccessed: em?.lastAccessed || new Date(),
-              }))
-              .filter((em) => em.moduleId)
-          : [],
+        type: enrollment.enrollmentType,
+        enrolledAt: enrollment.enrolledAt,
+        enrolledModules: [], // Match the exact format from your original response
       }
     }
 
@@ -602,6 +829,8 @@ exports.getCourse = async (req, res, next) => {
     next(error)
   }
 }
+
+
 
 // exports.updateCourse = async (req, res, next) => {
 //   let newUploadedImageKeys = []
