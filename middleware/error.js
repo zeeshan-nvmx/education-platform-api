@@ -34,7 +34,6 @@ const handleValidationErrorDB = (err) => {
     }
   })
 
-  // Return AppError instance with additional errors array
   const appError = new AppError('Validation failed', 400)
   appError.errors = errors
   return appError
@@ -44,7 +43,6 @@ const handleJWTError = () => new AppError('Your session is invalid. Please log i
 
 const handleJWTExpiredError = () => new AppError('Your session has expired. Please log in again.', 401)
 
-// Handle Mongoose Errors
 const handleMongooseError = (err) => {
   if (err instanceof mongoose.Error.ValidationError) {
     return handleValidationErrorDB(err)
@@ -58,61 +56,35 @@ const handleMongooseError = (err) => {
     return handleCastErrorDB(err)
   }
 
-  return err
+  return new AppError(err.message, 400) // Convert unknown errors to AppError
 }
 
 module.exports = (err, req, res, next) => {
-  console.log('Original Error:', err)
-
-  let error = err
-  // Only spread if it's not already an AppError
-  if (!(err instanceof AppError)) {
-    error = handleMongooseError({ ...err, message: err.message })
-  }
+  // Convert any non-AppError to AppError
+  let error = err instanceof AppError ? err : handleMongooseError(err)
 
   // Handle JWT Errors
   if (err.name === 'JsonWebTokenError') error = handleJWTError()
   if (err.name === 'TokenExpiredError') error = handleJWTExpiredError()
 
-  const statusCode = error.statusCode || 500
-  const status = error.status || 'error'
-
-  // Prepare the response object
-  const errorResponse = {
-    status,
-    message: error.message,
+  // Build response object
+  const responseBody = {
+    status: error.status || 'error',
+    message: error.message, // This should now properly show up
   }
 
-  // Add errors array if it exists
+  // Add validation errors if they exist
   if (error.errors) {
-    errorResponse.errors = error.errors
+    responseBody.errors = error.errors
   }
 
-  // Add additional details in development
+  // Add debug info in development
   if (process.env.NODE_ENV === 'development') {
-    errorResponse.error = error
-    errorResponse.stack = error.stack
+    responseBody.stack = error.stack
   }
 
-  // Final Response
-  if (process.env.NODE_ENV === 'development') {
-    res.status(statusCode).json(errorResponse)
-  } else {
-    // Production Error Response
-    if (error.isOperational || status === 'fail') {
-      // For operational errors, send the error message
-      delete errorResponse.error
-      delete errorResponse.stack
-      res.status(statusCode).json(errorResponse)
-    } else {
-      // For programming or unknown errors
-      console.error('ERROR 💥:', error)
-      res.status(500).json({
-        status: 'error',
-        message: 'Something went wrong!',
-      })
-    }
-  }
+  // Send response
+  res.status(error.statusCode || 500).json(responseBody)
 }
 
 // const { AppError } = require('../utils/errors')

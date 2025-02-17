@@ -1,3 +1,4 @@
+// errors.js
 class AppError extends Error {
   constructor(message, statusCode) {
     super(message)
@@ -5,7 +6,11 @@ class AppError extends Error {
     this.status = `${statusCode}`.startsWith('4') ? 'fail' : 'error'
     this.isOperational = true
 
-    // Remove error stack in production
+    Object.defineProperty(this, 'message', {
+      value: message,
+      enumerable: true, 
+    })
+
     if (process.env.NODE_ENV === 'production') {
       this.stack = undefined
     } else {
@@ -29,4 +34,3 @@ module.exports = {
 // }
 
 // exports.AppError = AppError
-
