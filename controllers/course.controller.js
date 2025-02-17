@@ -298,12 +298,16 @@ exports.getAllCourses = async (req, res, next) => {
       return next(new AppError(error.details[0].message, 400))
     }
 
-    const { page = 1, limit = 10, category, search, minPrice, maxPrice, sortBy = 'createdAt', order = 'desc' } = value
+    const { page = 1, limit = 10, category, featured, search, minPrice, maxPrice, sortBy = 'createdAt', order = 'desc' } = value
 
     const query = {} 
 
     if (category) {
       query.category = category
+    }
+
+    if (featured) {
+      query.featured = featured === 'true'
     }
 
     if (search) {
