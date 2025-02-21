@@ -1,6 +1,4 @@
-// utils/cloudflare.js
-const fetch = require('node-fetch')
-const FormData = require('form-data')
+const tus = require('tus-js-client')
 
 class CloudflareService {
   constructor() {
@@ -9,135 +7,126 @@ class CloudflareService {
     this.baseUrl = `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/stream`
   }
 
-  async getUploadUrl() {
-    try {
-      const response = await fetch(`${this.baseUrl}/direct_upload`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${this.apiToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          maxDurationSeconds: 7200,
-          allowedOrigins: [
-            'localhost:3000', // Local development without protocol
-            'localhost:5173', // Vite default port
-            'localhost',
-            'esgeducation.netlify.app',
-            ' ',
-          ],
-          requireSignedURLs: false,
-          enabledDownload: false,
-        }),
-      })
-
-      if (!response.ok) {
-        const error = await response.json()
-        throw new Error(`Failed to get upload URL: ${JSON.stringify(error)}`)
-      }
-
-      const data = await response.json()
-      return {
-        uploadUrl: data.result.uploadURL,
-        videoId: data.result.uid,
-      }
-    } catch (error) {
-      console.error('Error getting upload URL:', error)
-      throw error
-    }
-  }
-
   async uploadVideo(file) {
+    if (!file || !file.buffer) {
+      throw new Error('Invalid file input')
+    }
+
     try {
-      // First get the upload URL
-      const { uploadUrl, videoId } = await this.getUploadUrl()
+      let mediaId = ''
 
-      // Create FormData and append the file
-      const formData = new FormData()
-      formData.append('file', file.buffer, {
-        filename: file.originalname,
-        contentType: file.mimetype,
-      })
-
-      // Upload to Cloudflare
-      const uploadResponse = await fetch(uploadUrl, {
-        method: 'POST',
-        body: formData,
-        headers: {
-          ...formData.getHeaders(),
-        },
-      })
-
-      if (!uploadResponse.ok) {
-        const error = await uploadResponse.json()
-        throw new Error(`Failed to upload video: ${JSON.stringify(error)}`)
-      }
-
-      // Initial delay before checking status
-      await new Promise((resolve) => setTimeout(resolve, 2000))
-
-      // Wait for video processing with improved status checking
-      let attempts = 0
-      const maxAttempts = 20 // 2 minutes total wait time
-      let videoDetails = null
-
-      while (attempts < maxAttempts) {
-        try {
-          const response = await fetch(`${this.baseUrl}/${videoId}`, {
-            headers: {
-              Authorization: `Bearer ${this.apiToken}`,
-            },
-          })
-
-          if (!response.ok) {
-            throw new Error('Failed to get video status')
-          }
-
-          const data = await response.json()
-          videoDetails = data.result
-
-          console.log(`Processing status (${attempts + 1}/${maxAttempts}):`, {
-            phase: videoDetails.status?.state,
-            pctComplete: videoDetails.status?.pctComplete,
-          })
-
-          // Check both status.state and readyToStream
-          if (videoDetails.status?.state === 'ready' || videoDetails.readyToStream === true) {
-            console.log('Video is ready:', videoId)
-            return {
-              videoId,
-              videoDetails: {
-                status: videoDetails.status,
-                duration: videoDetails.duration,
-                thumbnail: videoDetails.thumbnail,
-                playbackUrl: videoDetails.playback?.hls,
-                dashUrl: videoDetails.playback?.dash,
-                meta: {
-                  size: videoDetails.size,
-                  created: videoDetails.created,
-                  modified: videoDetails.modified,
-                },
-              },
+      return new Promise((resolve, reject) => {
+        var options = {
+          endpoint: this.baseUrl,
+          headers: {
+            Authorization: `Bearer ${this.apiToken}`,
+          },
+          chunkSize: 50 * 1024 * 1024, // Required a minimum chunk size of 5 MB. Here we use 50 MB.
+          retryDelays: [0, 3000, 5000, 10000, 20000],
+          metadata: {
+            name: file.originalname,
+            filetype: file.mimetype,
+          },
+          uploadSize: file.size,
+          onError: function (error) {
+            console.error('Upload failed:', error)
+            reject(error)
+          },
+          onProgress: function (bytesUploaded, bytesTotal) {
+            var percentage = ((bytesUploaded / bytesTotal) * 100).toFixed(2)
+            console.log(bytesUploaded, bytesTotal, percentage + '%')
+          },
+          onSuccess: async function () {
+            try {
+              console.log('Upload finished')
+              await new Promise((resolve) => setTimeout(resolve, 2000))
+              const videoDetails = await this.waitForProcessing(mediaId)
+              resolve({
+                videoId: mediaId,
+                videoDetails,
+              })
+            } catch (error) {
+              reject(error)
             }
-          }
-
-          if (videoDetails.status?.state === 'failed') {
-            throw new Error('Video processing failed')
-          }
-        } catch (error) {
-          console.error(`Attempt ${attempts + 1} failed:`, error)
-          if (attempts === maxAttempts - 1) throw error
+          }.bind(this),
+          onAfterResponse: function (req, res) {
+            return new Promise((resolve) => {
+              var mediaIdHeader = res.getHeader('stream-media-id')
+              if (mediaIdHeader) {
+                mediaId = mediaIdHeader
+              }
+              resolve()
+            })
+          },
         }
 
-        await new Promise((resolve) => setTimeout(resolve, 6000)) // 6 second delay between checks
-        attempts++
-      }
-
-      throw new Error('Video processing timed out or status check failed')
+        // Use the buffer directly with tus
+        var upload = new tus.Upload(file.buffer, options)
+        upload.start()
+      })
     } catch (error) {
       console.error('Error in upload process:', error)
       throw error
     }
+  }
+
+  async waitForProcessing(videoId) {
+    let attempts = 0
+    const maxAttempts = 30
+    const retryDelay = 10000
+
+    while (attempts < maxAttempts) {
+      try {
+        const response = await fetch(`${this.baseUrl}/${videoId}`, {
+          headers: {
+            Authorization: `Bearer ${this.apiToken}`,
+          },
+        })
+
+        if (!response.ok) {
+          const error = await response.json()
+          throw new Error(`Failed to get video status: ${JSON.stringify(error)}`)
+        }
+
+        const data = await response.json()
+        const videoDetails = data.result
+
+        console.log(`Processing status (${attempts + 1}/${maxAttempts}):`, {
+          phase: videoDetails.status?.state,
+          pctComplete: videoDetails.status?.pctComplete,
+        })
+
+        if (videoDetails.status?.state === 'ready' || videoDetails.readyToStream === true) {
+          return {
+            status: videoDetails.status,
+            duration: videoDetails.duration,
+            thumbnail: videoDetails.thumbnail,
+            playbackUrl: videoDetails.playback?.hls,
+            dashUrl: videoDetails.playback?.dash,
+            rawUrl: videoDetails.input?.src,
+            meta: {
+              size: videoDetails.size,
+              created: videoDetails.created,
+              modified: videoDetails.modified,
+            },
+          }
+        }
+
+        if (videoDetails.status?.state === 'failed') {
+          throw new Error(`Video processing failed: ${videoDetails.status?.errorReasonText || 'Unknown error'}`)
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, retryDelay))
+        attempts++
+      } catch (error) {
+        console.error(`Processing check attempt ${attempts + 1} failed:`, error)
+        if (attempts === maxAttempts - 1) throw error
+        await new Promise((resolve) => setTimeout(resolve, retryDelay))
+        attempts++
+      }
+    }
+
+    throw new Error('Video processing timed out')
   }
 
   async getVideoDetails(videoId) {
@@ -186,11 +175,9 @@ class CloudflareService {
 
   async deleteVideo(videoId) {
     try {
-      // Check if video exists first
       try {
         await this.getVideoDetails(videoId)
       } catch (error) {
-        // If video doesn't exist, return success
         if (error.message.includes('not found')) {
           return true
         }

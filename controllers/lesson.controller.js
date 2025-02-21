@@ -1303,19 +1303,110 @@ exports.trackProgress = async (req, res, next) => {
 }
 
 // Video Management Functions
-exports.uploadLessonVideo = async (req, res, next) => {
-  const session = await mongoose.startSession()
-  session.startTransaction()
 
+
+// exports.uploadLessonVideo = async (req, res, next) => {
+//   const session = await mongoose.startSession()
+//   session.startTransaction()
+
+//   try {
+//     if (!req.file) {
+//       return next(new AppError('Please provide a video file', 400))
+//     }
+
+//     // Check file size (e.g., 200MB limit)
+//     const maxSize = 1000 * 1024 * 1024 // 1000MB in bytes
+//     if (req.file.size > maxSize) {
+//       return next(new AppError('Video file too large. Maximum size is 200MB', 400))
+//     }
+
+//     // Check file type
+//     if (!req.file.mimetype.startsWith('video/')) {
+//       return next(new AppError('Please upload only video files', 400))
+//     }
+
+//     const lesson = await Lesson.findOne({
+//       _id: req.params.lessonId,
+//       module: req.params.moduleId,
+//       isDeleted: false,
+//     }).session(session)
+
+//     if (!lesson) {
+//       await session.abortTransaction()
+//       return next(new AppError('Lesson not found', 404))
+//     }
+
+//     // If there's an existing video, delete it
+//     if (lesson.cloudflareVideoId) {
+//       try {
+//         await CloudflareService.deleteVideo(lesson.cloudflareVideoId)
+//       } catch (error) {
+//         console.error('Error deleting existing video:', error)
+//       }
+//     }
+
+//     // Upload new video
+//     try {
+//       const { videoId, videoDetails } = await CloudflareService.uploadVideo(req.file)
+
+//       // Update lesson with all video details
+//       lesson.videoUrl = videoDetails.playbackUrl
+//       lesson.dashUrl = videoDetails.dashUrl
+//       lesson.rawUrl = videoDetails.rawUrl
+//       lesson.cloudflareVideoId = videoId
+//       lesson.duration = videoDetails.duration || 0
+//       lesson.thumbnail = videoDetails.thumbnail
+//       lesson.videoMeta = {
+//         size: videoDetails.meta.size,
+//         created: videoDetails.meta.created,
+//         modified: videoDetails.meta.modified,
+//         status: videoDetails.meta.status,
+//       }
+
+//       // Reset video progress for all users
+//       await VideoProgress.deleteMany({
+//         lesson: lesson._id
+//       }).session(session)
+
+//       await lesson.save({ session })
+//       await session.commitTransaction()
+
+//       res.status(200).json({
+//         message: 'Video uploaded successfully',
+//         data: {
+//           videoUrl: lesson.videoUrl,
+//           dashUrl: lesson.dashUrl,
+//           rawUrl: lesson.rawUrl,
+//           duration: lesson.duration,
+//           thumbnail: lesson.thumbnail,
+//           videoMeta: lesson.videoMeta,
+//         },
+//       })
+//     } catch (uploadError) {
+//       console.error('Error during video upload:', uploadError)
+//       await session.abortTransaction()
+//       return next(new AppError('Failed to upload video. Please try again.', 500))
+//     }
+//   } catch (error) {
+//     console.error('Error in uploadLessonVideo:', error)
+//     await session.abortTransaction()
+//     next(error)
+//   } finally {
+//     session.endSession()
+//   }
+// }
+
+exports.uploadLessonVideo = async (req, res, next) => {
   try {
+    // Initial validations before any operations
     if (!req.file) {
       return next(new AppError('Please provide a video file', 400))
     }
 
-    // Check file size (e.g., 200MB limit)
+    // Check file size
     const maxSize = 1000 * 1024 * 1024 // 1000MB in bytes
     if (req.file.size > maxSize) {
-      return next(new AppError('Video file too large. Maximum size is 200MB', 400))
+      return next(new AppError('Video file too large. Maximum size is 1000MB', 400))
     }
 
     // Check file type
@@ -1323,51 +1414,65 @@ exports.uploadLessonVideo = async (req, res, next) => {
       return next(new AppError('Please upload only video files', 400))
     }
 
+    // First, find the lesson without transaction
     const lesson = await Lesson.findOne({
       _id: req.params.lessonId,
       module: req.params.moduleId,
       isDeleted: false,
-    }).session(session)
+    })
 
     if (!lesson) {
-      await session.abortTransaction()
       return next(new AppError('Lesson not found', 404))
     }
 
-    // If there's an existing video, delete it
-    if (lesson.cloudflareVideoId) {
-      try {
-        await CloudflareService.deleteVideo(lesson.cloudflareVideoId)
-      } catch (error) {
-        console.error('Error deleting existing video:', error)
-      }
+    // Store old video ID for cleanup
+    const oldVideoId = lesson.cloudflareVideoId
+
+    // Upload new video to Cloudflare (outside transaction)
+    let uploadResult
+    try {
+      uploadResult = await CloudflareService.uploadVideo(req.file)
+    } catch (uploadError) {
+      console.error('Error during video upload:', uploadError)
+      return next(new AppError('Failed to upload video. Please try again.', 500))
     }
 
-    // Upload new video
-    try {
-      const { videoId, videoDetails } = await CloudflareService.uploadVideo(req.file)
+    // Now start MongoDB transaction for database updates
+    const session = await mongoose.startSession()
+    session.startTransaction()
 
+    try {
       // Update lesson with all video details
-      lesson.videoUrl = videoDetails.playbackUrl
-      lesson.dashUrl = videoDetails.dashUrl
-      lesson.rawUrl = videoDetails.rawUrl
-      lesson.cloudflareVideoId = videoId
-      lesson.duration = videoDetails.duration || 0
-      lesson.thumbnail = videoDetails.thumbnail
+      lesson.videoUrl = uploadResult.videoDetails.playbackUrl
+      lesson.dashUrl = uploadResult.videoDetails.dashUrl
+      lesson.rawUrl = uploadResult.videoDetails.rawUrl
+      lesson.cloudflareVideoId = uploadResult.videoId
+      lesson.duration = uploadResult.videoDetails.duration || 0
+      lesson.thumbnail = uploadResult.videoDetails.thumbnail
       lesson.videoMeta = {
-        size: videoDetails.meta.size,
-        created: videoDetails.meta.created,
-        modified: videoDetails.meta.modified,
-        status: videoDetails.meta.status,
+        size: uploadResult.videoDetails.meta.size,
+        created: uploadResult.videoDetails.meta.created,
+        modified: uploadResult.videoDetails.meta.modified,
+        status: uploadResult.videoDetails.meta.status,
       }
 
       // Reset video progress for all users
       await VideoProgress.deleteMany({
-        lesson: lesson._id
+        lesson: lesson._id,
       }).session(session)
 
       await lesson.save({ session })
       await session.commitTransaction()
+
+      // After successful transaction, delete old video if it exists
+      if (oldVideoId) {
+        try {
+          await CloudflareService.deleteVideo(oldVideoId)
+        } catch (error) {
+          console.error('Error deleting old video:', error)
+          // Don't fail the request if old video deletion fails
+        }
+      }
 
       res.status(200).json({
         message: 'Video uploaded successfully',
@@ -1380,17 +1485,22 @@ exports.uploadLessonVideo = async (req, res, next) => {
           videoMeta: lesson.videoMeta,
         },
       })
-    } catch (uploadError) {
-      console.error('Error during video upload:', uploadError)
+    } catch (error) {
+      // If database update fails, try to delete the newly uploaded video
+      try {
+        await CloudflareService.deleteVideo(uploadResult.videoId)
+      } catch (deleteError) {
+        console.error('Error deleting failed upload:', deleteError)
+      }
+
       await session.abortTransaction()
-      return next(new AppError('Failed to upload video. Please try again.', 500))
+      throw error
+    } finally {
+      session.endSession()
     }
   } catch (error) {
     console.error('Error in uploadLessonVideo:', error)
-    await session.abortTransaction()
     next(error)
-  } finally {
-    session.endSession()
   }
 }
 

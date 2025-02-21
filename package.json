@@ -33,6 +33,7 @@
     "sanitize-html": "^2.14.0",
     "sslcommerz-lts": "^1.1.0",
     "sslcommerz-nodejs": "^1.0.8",
+    "tus-js-client": "^4.3.1",
     "winston": "^3.17.0",
     "xss-clean": "^0.1.4"
   }
