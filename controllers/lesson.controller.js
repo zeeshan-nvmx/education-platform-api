@@ -1313,7 +1313,7 @@ exports.uploadLessonVideo = async (req, res, next) => {
     }
 
     // Check file size (e.g., 200MB limit)
-    const maxSize = 1000 * 1024 * 1024 // 200MB in bytes
+    const maxSize = 1000 * 1024 * 1024 // 1000MB in bytes
     if (req.file.size > maxSize) {
       return next(new AppError('Video file too large. Maximum size is 200MB', 400))
     }
