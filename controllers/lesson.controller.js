@@ -1474,6 +1474,11 @@ exports.uploadLessonVideo = async (req, res, next) => {
         }
       }
 
+      // Force garbage collection
+      if (global.gc) {
+        global.gc()
+      }
+
       res.status(200).json({
         message: 'Video uploaded successfully',
         data: {
