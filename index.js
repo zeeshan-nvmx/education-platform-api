@@ -14,19 +14,6 @@ const { AppError } = require('./utils/errors')
 
 const testEnrollmentRouter = require('./routes/testEnrollment.routes')
 
-// Check if garbage collection is enabled
-if (global.gc) {
-  console.log('✅ Garbage collection (--expose-gc) is enabled')
-  const memUsage = process.memoryUsage()
-  console.log('Initial memory usage:', {
-    heap: Math.round(memUsage.heapUsed / 1024 / 1024) + 'MB',
-    total: Math.round(memUsage.heapTotal / 1024 / 1024) + 'MB',
-    rss: Math.round(memUsage.rss / 1024 / 1024) + 'MB'
-  })
-} else {
-  console.warn('⚠️ Garbage collection is NOT enabled. Please run with --expose-gc flag')
-}
-
 const app = express()
 let server
 

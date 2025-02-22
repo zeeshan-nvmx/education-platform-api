@@ -1396,121 +1396,7 @@ exports.trackProgress = async (req, res, next) => {
 //   }
 // }
 
-// // tus upload for larger files
-// exports.uploadLessonVideo = async (req, res, next) => {
-//   try {
-//     // Initial validations before any operations
-//     if (!req.file) {
-//       return next(new AppError('Please provide a video file', 400))
-//     }
-
-//     // Check file size
-//     const maxSize = 1000 * 1024 * 1024 // 1000MB in bytes
-//     if (req.file.size > maxSize) {
-//       return next(new AppError('Video file too large. Maximum size is 1000MB', 400))
-//     }
-
-//     // Check file type
-//     if (!req.file.mimetype.startsWith('video/')) {
-//       return next(new AppError('Please upload only video files', 400))
-//     }
-
-//     // First, find the lesson without transaction
-//     const lesson = await Lesson.findOne({
-//       _id: req.params.lessonId,
-//       module: req.params.moduleId,
-//       isDeleted: false,
-//     })
-
-//     if (!lesson) {
-//       return next(new AppError('Lesson not found', 404))
-//     }
-
-//     // Store old video ID for cleanup
-//     const oldVideoId = lesson.cloudflareVideoId
-
-//     // Upload new video to Cloudflare (outside transaction)
-//     let uploadResult
-//     try {
-//       uploadResult = await CloudflareService.uploadVideo(req.file)
-//     } catch (uploadError) {
-//       console.error('Error during video upload:', uploadError)
-//       return next(new AppError('Failed to upload video. Please try again.', 500))
-//     }
-
-//     // Now start MongoDB transaction for database updates
-//     const session = await mongoose.startSession()
-//     session.startTransaction()
-
-//     try {
-//       // Update lesson with all video details
-//       lesson.videoUrl = uploadResult.videoDetails.playbackUrl
-//       lesson.dashUrl = uploadResult.videoDetails.dashUrl
-//       lesson.rawUrl = uploadResult.videoDetails.rawUrl
-//       lesson.cloudflareVideoId = uploadResult.videoId
-//       lesson.duration = uploadResult.videoDetails.duration || 0
-//       lesson.thumbnail = uploadResult.videoDetails.thumbnail
-//       lesson.videoMeta = {
-//         size: uploadResult.videoDetails.meta.size,
-//         created: uploadResult.videoDetails.meta.created,
-//         modified: uploadResult.videoDetails.meta.modified,
-//         status: uploadResult.videoDetails.meta.status,
-//       }
-
-//       // Reset video progress for all users
-//       await VideoProgress.deleteMany({
-//         lesson: lesson._id,
-//       }).session(session)
-
-//       await lesson.save({ session })
-//       await session.commitTransaction()
-
-//       // After successful transaction, delete old video if it exists
-//       if (oldVideoId) {
-//         try {
-//           await CloudflareService.deleteVideo(oldVideoId)
-//         } catch (error) {
-//           console.error('Error deleting old video:', error)
-//           // Don't fail the request if old video deletion fails
-//         }
-//       }
-
-//       // Force garbage collection
-//       if (global.gc) {
-//         global.gc()
-//       }
-
-//       res.status(200).json({
-//         message: 'Video uploaded successfully',
-//         data: {
-//           videoUrl: lesson.videoUrl,
-//           dashUrl: lesson.dashUrl,
-//           rawUrl: lesson.rawUrl,
-//           duration: lesson.duration,
-//           thumbnail: lesson.thumbnail,
-//           videoMeta: lesson.videoMeta,
-//         },
-//       })
-//     } catch (error) {
-//       // If database update fails, try to delete the newly uploaded video
-//       try {
-//         await CloudflareService.deleteVideo(uploadResult.videoId)
-//       } catch (deleteError) {
-//         console.error('Error deleting failed upload:', deleteError)
-//       }
-
-//       await session.abortTransaction()
-//       throw error
-//     } finally {
-//       session.endSession()
-//     }
-//   } catch (error) {
-//     console.error('Error in uploadLessonVideo:', error)
-//     next(error)
-//   }
-// }
-
-// tus upload with garbage collection for freeing up memory after upload
+// tus upload for larger files
 exports.uploadLessonVideo = async (req, res, next) => {
   try {
     // Initial validations before any operations
@@ -1547,19 +1433,6 @@ exports.uploadLessonVideo = async (req, res, next) => {
     let uploadResult
     try {
       uploadResult = await CloudflareService.uploadVideo(req.file)
-
-      // Clear file buffer after successful upload
-      req.file.buffer = null
-      if (global.gc) {
-        const beforeMemory = process.memoryUsage()
-        global.gc()
-        const afterMemory = process.memoryUsage()
-
-        console.log('Garbage Collection after upload:')
-        console.log('Before GC - Heap Used:', Math.round(beforeMemory.heapUsed / 1024 / 1024), 'MB')
-        console.log('After GC - Heap Used:', Math.round(afterMemory.heapUsed / 1024 / 1024), 'MB')
-        console.log('Memory freed:', Math.round((beforeMemory.heapUsed - afterMemory.heapUsed) / 1024 / 1024), 'MB')
-      }
     } catch (uploadError) {
       console.error('Error during video upload:', uploadError)
       return next(new AppError('Failed to upload video. Please try again.', 500))
@@ -1602,16 +1475,9 @@ exports.uploadLessonVideo = async (req, res, next) => {
         }
       }
 
-      // Final garbage collection after all operations
+      // Force garbage collection
       if (global.gc) {
-        const beforeMemory = process.memoryUsage()
         global.gc()
-        const afterMemory = process.memoryUsage()
-
-        console.log('Final Garbage Collection:')
-        console.log('Before GC - Heap Used:', Math.round(beforeMemory.heapUsed / 1024 / 1024), 'MB')
-        console.log('After GC - Heap Used:', Math.round(afterMemory.heapUsed / 1024 / 1024), 'MB')
-        console.log('Memory freed:', Math.round((beforeMemory.heapUsed - afterMemory.heapUsed) / 1024 / 1024), 'MB')
       }
 
       res.status(200).json({
