@@ -31,6 +31,7 @@ const app = express()
 let server
 
 // Global Middleware
+app.set('trust proxy', 1)
 app.use(cors())
 app.use(helmet())
 if (process.env.NODE_ENV === 'development') {
