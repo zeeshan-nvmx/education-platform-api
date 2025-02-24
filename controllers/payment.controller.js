@@ -114,13 +114,20 @@ async function verifyAccess(userId, courseId, moduleIds = []) {
 //     throw new AppError('User not found', 404)
 //   }
 
+//   // Find existing course enrollment
 //   const existingEnrollment = user.enrolledCourses.find((ec) => ec.course.toString() === courseId)
 
 //   if (purchaseType === 'course') {
+//     // Handle full course enrollment
 //     if (existingEnrollment) {
+//       if (existingEnrollment.enrollmentType === 'full') {
+//         throw new AppError('Already enrolled in this course', 400)
+//       }
+//       // Upgrade from module to full access
 //       existingEnrollment.enrollmentType = 'full'
 //       existingEnrollment.enrolledModules = []
 //     } else {
+//       // Create new full course enrollment
 //       user.enrolledCourses.push({
 //         course: courseId,
 //         enrollmentType: 'full',
@@ -129,23 +136,48 @@ async function verifyAccess(userId, courseId, moduleIds = []) {
 //       })
 //     }
 //   } else {
+//     // Handle module enrollment
 //     if (!moduleIds.length) {
 //       throw new AppError('No modules specified for module purchase', 400)
 //     }
 
+//     // Validate all modules exist and belong to the course
+//     const modules = await Module.find({
+//       _id: { $in: moduleIds },
+//       course: courseId,
+//       isDeleted: false,
+//     }).session(session)
+
+//     if (modules.length !== moduleIds.length) {
+//       throw new AppError('One or more modules not found or do not belong to this course', 404)
+//     }
+
 //     if (existingEnrollment) {
-//       moduleIds.forEach((moduleId) => {
-//         if (!existingEnrollment.enrolledModules.some((em) => em.module.toString() === moduleId.toString())) {
-//           existingEnrollment.enrolledModules.push({
-//             module: moduleId,
-//             enrolledAt: new Date(),
-//             completedLessons: [],
-//             completedQuizzes: [],
-//             lastAccessed: new Date(),
-//           })
-//         }
+//       // Check existing enrollment type
+//       if (existingEnrollment.enrollmentType === 'full') {
+//         throw new AppError('Already have full access to this course', 400)
+//       }
+
+//       // Check for duplicate module enrollments
+//       const existingModuleIds = existingEnrollment.enrolledModules.map((em) => em.module.toString())
+//       const newModuleIds = moduleIds.filter((moduleId) => !existingModuleIds.includes(moduleId.toString()))
+
+//       if (!newModuleIds.length) {
+//         throw new AppError('Already enrolled in all specified modules', 400)
+//       }
+
+//       // Add new modules to existing enrollment
+//       newModuleIds.forEach((moduleId) => {
+//         existingEnrollment.enrolledModules.push({
+//           module: moduleId,
+//           enrolledAt: new Date(),
+//           completedLessons: [],
+//           completedQuizzes: [],
+//           lastAccessed: new Date(),
+//         })
 //       })
 //     } else {
+//       // Create new module-based enrollment
 //       user.enrolledCourses.push({
 //         course: courseId,
 //         enrollmentType: 'module',
@@ -172,7 +204,7 @@ async function processEnrollment(userId, courseId, purchaseType, moduleIds = [],
   }
 
   // Find existing course enrollment
-  const existingEnrollment = user.enrolledCourses.find((ec) => ec.course.toString() === courseId)
+  const existingEnrollment = user.enrolledCourses.find((ec) => ec.course.toString() === courseId.toString())
 
   if (purchaseType === 'course') {
     // Handle full course enrollment
@@ -376,6 +408,141 @@ exports.initiateCoursePayment = async (req, res, next) => {
   }
 }
 
+// exports.initiateModulePayment = async (req, res, next) => {
+//   const session = await mongoose.startSession()
+//   session.startTransaction()
+
+//   try {
+//     const { error, value } = initiateModulePaymentSchema.validate(req.body)
+//     if (error) {
+//       return res.status(400).json({
+//         status: 'error',
+//         errors: error.details.map((detail) => ({
+//           field: detail.context.key,
+//           message: detail.message,
+//         })),
+//       })
+//     }
+
+//     const { moduleIds } = value
+
+//     const [course, modules] = await Promise.all([
+//       Course.findOne({
+//         _id: req.params.courseId,
+//         isDeleted: false,
+//       }).session(session),
+//       Module.find({
+//         _id: { $in: moduleIds },
+//         course: req.params.courseId,
+//         isDeleted: false,
+//       }).session(session),
+//     ])
+
+//     if (!course) {
+//       await session.abortTransaction()
+//       return next(new AppError('Course not found', 404))
+//     }
+
+//     if (modules.length !== moduleIds.length) {
+//       await session.abortTransaction()
+//       return next(new AppError('One or more modules not found', 404))
+//     }
+
+//     const hasAccess = !(await verifyAccess(req.user._id, course._id, moduleIds))
+//     if (hasAccess) {
+//       await session.abortTransaction()
+//       return next(new AppError('You already have access to one or more of these modules', 400))
+//     }
+
+//     const totalAmount = modules.reduce((sum, module) => sum + module.price, 0)
+//     const { discountedAmount, discount } = await calculateDiscountedAmount(totalAmount, value.discountCode, course._id)
+//     const transactionId = crypto.randomBytes(16).toString('hex')
+
+//     const sslData = {
+//       store_id: process.env.SSLCOMMERZ_STORE_ID,
+//       store_passwd: process.env.SSLCOMMERZ_STORE_PASSWORD,
+//       total_amount: discountedAmount,
+//       currency: 'BDT',
+//       tran_id: transactionId,
+//       success_url: value.redirectUrl,
+//       fail_url: value.redirectUrl,
+//       cancel_url: value.redirectUrl,
+//       ipn_url: `${process.env.API_BASE_URL}/api/payments/ipn`,
+//       product_name: `${course.title} - ${modules.length} Modules`,
+//       product_category: 'Course Modules',
+//       product_profile: 'non-physical-goods',
+//       cus_name: `${req.user.firstName} ${req.user.lastName}`,
+//       cus_email: req.user.email,
+//       cus_add1: value.shippingAddress.address,
+//       cus_city: value.shippingAddress.city,
+//       cus_country: value.shippingAddress.country,
+//       cus_phone: value.shippingAddress.phone,
+//       shipping_method: 'NO',
+//       num_of_item: modules.length,
+//       emi_option: 0,
+//       value_a: course._id.toString(),
+//       value_b: 'module',
+//       value_c: req.user._id.toString(),
+//       value_d: moduleIds.join(','),
+//     }
+
+//     const payment = await Payment.create(
+//       [
+//         {
+//           user: req.user._id,
+//           course: course._id,
+//           purchaseType: 'module',
+//           modules: moduleIds,
+//           amount: totalAmount,
+//           discount,
+//           discountedAmount,
+//           transactionId,
+//           customerDetails: {
+//             name: `${req.user.firstName} ${req.user.lastName}`,
+//             email: req.user.email,
+//             ...value.shippingAddress,
+//           },
+//           status: 'pending',
+//           createdAt: new Date(),
+//         },
+//       ],
+//       { session }
+//     )
+
+//     const sslResponse = await initiatePayment(sslData)
+
+//     if (!sslResponse?.GatewayPageURL || !sslResponse?.sessionkey) {
+//       await session.abortTransaction()
+//       return next(new AppError('Failed to initialize payment gateway', 500))
+//     }
+
+//     await Payment.findByIdAndUpdate(
+//       payment[0]._id,
+//       {
+//         sslcommerzSessionKey: sslResponse.sessionkey,
+//         gatewayPageURL: sslResponse.GatewayPageURL,
+//       },
+//       { session }
+//     )
+
+//     await session.commitTransaction()
+
+//     res.status(200).json({
+//       status: 'success',
+//       data: {
+//         transactionId,
+//         amount: discountedAmount,
+//         gatewayRedirectURL: sslResponse.GatewayPageURL,
+//       },
+//     })
+//   } catch (error) {
+//     await session.abortTransaction()
+//     next(error)
+//   } finally {
+//     session.endSession()
+//   }
+// }
+
 exports.initiateModulePayment = async (req, res, next) => {
   const session = await mongoose.startSession()
   session.startTransaction()
@@ -432,9 +599,9 @@ exports.initiateModulePayment = async (req, res, next) => {
       total_amount: discountedAmount,
       currency: 'BDT',
       tran_id: transactionId,
-      success_url: value.redirectUrl,
-      fail_url: value.redirectUrl,
-      cancel_url: value.redirectUrl,
+      success_url: `${process.env.API_BASE_URL}/api/payments/redirect`,
+      fail_url: `${process.env.API_BASE_URL}/api/payments/redirect`,
+      cancel_url: `${process.env.API_BASE_URL}/api/payments/redirect`,
       ipn_url: `${process.env.API_BASE_URL}/api/payments/ipn`,
       product_name: `${course.title} - ${modules.length} Modules`,
       product_category: 'Course Modules',
@@ -471,6 +638,8 @@ exports.initiateModulePayment = async (req, res, next) => {
             ...value.shippingAddress,
           },
           status: 'pending',
+          redirectStatus: 'pending',
+          ipnStatus: 'pending',
           createdAt: new Date(),
         },
       ],
@@ -497,6 +666,7 @@ exports.initiateModulePayment = async (req, res, next) => {
 
     res.status(200).json({
       status: 'success',
+      message: 'Payment initialized successfully',
       data: {
         transactionId,
         amount: discountedAmount,
@@ -510,6 +680,131 @@ exports.initiateModulePayment = async (req, res, next) => {
     session.endSession()
   }
 }
+
+// exports.handlePaymentRedirect = async (req, res, next) => {
+//   const session = await mongoose.startSession()
+//   session.startTransaction()
+
+//   try {
+//     const { status, tran_id, val_id } = req.body
+
+//     const payment = await Payment.findOne({
+//       transactionId: tran_id,
+//       status: { $in: ['pending', 'processing'] },
+//     }).session(session)
+
+//     if (!payment) {
+//       console.error('Payment not found for transaction:', tran_id)
+//       await session.abortTransaction()
+//       return res.redirect(`${process.env.FRONTEND_URL}/payment/verify-payment/error?message=invalid_transaction`)
+//     }
+
+//     // Verify course exists
+//     const course = await Course.findOne({
+//       _id: payment.course,
+//       isDeleted: false,
+//     }).session(session)
+
+//     if (!course) {
+//       console.error('Course not found:', payment.course)
+//       await session.abortTransaction()
+//       return res.redirect(`${process.env.FRONTEND_URL}/payment/verify-payment/error?message=course_not_found`)
+//     }
+
+//     let redirectStatus
+//     switch (status?.toUpperCase()) {
+//       case 'VALID':
+//         redirectStatus = 'success'
+//         if (redirectStatus === 'success') {
+//           try {
+//             // Process enrollment
+//             await processEnrollment(payment.user, payment.course, payment.purchaseType, payment.modules || [], session)
+
+//             // Update payment status
+//             payment.status = 'completed'
+//             payment.completedAt = new Date()
+//             await payment.save({ session })
+
+//             // Update course total students if this is their first enrollment
+//             const existingEnrollment = await User.findOne({
+//               _id: payment.user,
+//               'enrolledCourses.course': payment.course,
+//             }).session(session)
+
+//             if (!existingEnrollment) {
+//               await Course.updateOne({ _id: payment.course }, { $inc: { totalStudents: 1 } }, { session })
+//             }
+
+//             // Update discount usage if applicable
+//             if (payment.discount) {
+//               await Discount.updateOne({ _id: payment.discount }, { $inc: { usedCount: 1 } }, { session })
+//             }
+//           } catch (enrollmentError) {
+//             console.error('Enrollment processing error:', enrollmentError)
+//             redirectStatus = 'failed'
+//             payment.status = 'failed'
+//             payment.failureReason = enrollmentError.message
+//             await payment.save({ session })
+//           }
+//         }
+//         break
+//       case 'FAILED':
+//         redirectStatus = 'failed'
+//         payment.status = 'failed'
+//         await payment.save({ session })
+//         break
+//       case 'CANCELLED':
+//         redirectStatus = 'cancelled'
+//         payment.status = 'cancelled'
+//         await payment.save({ session })
+//         break
+//       default:
+//         redirectStatus = 'failed'
+//         payment.status = 'failed'
+//         await payment.save({ session })
+//     }
+
+//     // Store the redirect response
+//     await Payment.updateOne(
+//       { transactionId: tran_id },
+//       {
+//         $set: {
+//           redirectResponse: req.body,
+//           redirectStatus,
+//           updatedAt: new Date(),
+//         },
+//       },
+//       { session }
+//     )
+
+//     await session.commitTransaction()
+
+//     // Construct redirect URL
+//     let redirectUrl = process.env.FRONTEND_URL
+//     switch (redirectStatus) {
+//       case 'success':
+//         redirectUrl += `/payment/verify-payment/success?tran_id=${tran_id}&val_id=${val_id}`
+//         break
+//       case 'failed':
+//         redirectUrl += `/payment/verify-payment/failed?tran_id=${tran_id}`
+//         break
+//       case 'cancelled':
+//         redirectUrl += `/payment/verify-payment/cancelled?tran_id=${tran_id}`
+//         break
+//       default:
+//         redirectUrl += `/payment/verify-payment/error?message=invalid_status`
+//     }
+
+//     redirectUrl += `&amount=${payment.amount}`
+//     res.redirect(redirectUrl)
+//   } catch (error) {
+//     console.error('Payment redirect handling error:', error)
+//     await session.abortTransaction()
+//     res.redirect(`${process.env.FRONTEND_URL}/payment/verify-payment/error?message=server_error`)
+//   } finally {
+//     session.endSession()
+//   }
+// }
 
 exports.handlePaymentRedirect = async (req, res, next) => {
   const session = await mongoose.startSession()
@@ -539,6 +834,21 @@ exports.handlePaymentRedirect = async (req, res, next) => {
       console.error('Course not found:', payment.course)
       await session.abortTransaction()
       return res.redirect(`${process.env.FRONTEND_URL}/payment/verify-payment/error?message=course_not_found`)
+    }
+
+    // For module purchases, verify all modules exist
+    if (payment.purchaseType === 'module' && payment.modules && payment.modules.length > 0) {
+      const modules = await Module.find({
+        _id: { $in: payment.modules },
+        course: payment.course,
+        isDeleted: false,
+      }).session(session)
+
+      if (modules.length !== payment.modules.length) {
+        console.error('One or more modules not found:', payment.modules)
+        await session.abortTransaction()
+        return res.redirect(`${process.env.FRONTEND_URL}/payment/verify-payment/error?message=modules_not_found`)
+      }
     }
 
     let redirectStatus
@@ -625,7 +935,14 @@ exports.handlePaymentRedirect = async (req, res, next) => {
         redirectUrl += `/payment/verify-payment/error?message=invalid_status`
     }
 
-    redirectUrl += `&amount=${payment.amount}`
+    // Add purchase type to the redirect URL
+    redirectUrl += `&amount=${payment.amount}&type=${payment.purchaseType}`
+
+    // For module purchases, include module information
+    if (payment.purchaseType === 'module' && payment.modules && payment.modules.length > 0) {
+      redirectUrl += `&moduleCount=${payment.modules.length}`
+    }
+
     res.redirect(redirectUrl)
   } catch (error) {
     console.error('Payment redirect handling error:', error)
@@ -664,199 +981,30 @@ exports.handlePaymentRedirect = async (req, res, next) => {
 
 //     const { tran_id, status, amount, bank_tran_id, card_type } = value
 
-//     // Find payment and check if it's already processed
 //     const payment = await Payment.findOne({
 //       transactionId: tran_id,
-//       status: { $in: ['pending', 'processing'] },
 //     }).session(session)
 
 //     if (!payment) {
-//       console.error('Payment not found or already processed:', tran_id)
+//       console.error('Payment not found:', tran_id)
 //       await session.abortTransaction()
-//       return res.status(200).json({ status: 'error', message: 'Invalid transaction or already processed' })
+//       return res.status(200).json({ status: 'error', message: 'Invalid transaction' })
 //     }
 
-//     // Update payment status to processing if still pending
-//     if (payment.status === 'pending') {
-//       payment.status = 'processing'
-//       await payment.save({ session })
-//     }
-
-//     // Store the raw IPN response
+//     // Store the IPN response
 //     payment.ipnResponse = req.body
 //     payment.ipnStatus = status === 'VALID' ? 'success' : 'failed'
+//     payment.bankTransactionId = bank_tran_id
+//     payment.paymentMethod = card_type
 
-//     if (status !== 'VALID') {
-//       console.log('Payment status not valid:', status)
-//       payment.status = 'failed'
-//       payment.failureReason = `Invalid payment status: ${status}`
-//       await payment.save({ session })
-//       await session.commitTransaction()
-//       return res.status(200).json({ status: 'success' })
-//     }
+//     await payment.save({ session })
+//     await session.commitTransaction()
 
-//     // Validate amount matches
-//     const expectedAmount = payment.discountedAmount || payment.amount
-//     const receivedAmount = parseFloat(amount)
-
-//     if (Math.abs(receivedAmount - expectedAmount) > 0.01) {
-//       console.error('Amount mismatch:', { expected: expectedAmount, received: receivedAmount })
-//       payment.status = 'failed'
-//       payment.failureReason = 'Amount mismatch'
-//       await payment.save({ session })
-//       await session.commitTransaction()
-//       return res.status(200).json({ status: 'success' })
-//     }
-
-//     try {
-//       // Only process enrollment if both redirect and IPN are successful
-//       if (payment.redirectStatus === 'success') {
-//         await processEnrollment(payment.user, payment.course, payment.purchaseType, payment.modules || [], session)
-
-//         // Update payment status
-//         payment.status = 'completed'
-//         payment.completedAt = new Date()
-//         payment.bankTransactionId = bank_tran_id
-//         payment.paymentMethod = card_type
-//         await payment.save({ session })
-
-//         // Update course total students if needed
-//         const existingEnrollment = await User.findOne({
-//           _id: payment.user,
-//           'enrolledCourses.course': payment.course,
-//         }).session(session)
-
-//         if (!existingEnrollment) {
-//           await Course.updateOne({ _id: payment.course }, { $inc: { totalStudents: 1 } }, { session })
-//         }
-
-//         // Update discount usage if applicable
-//         if (payment.discount) {
-//           await Discount.updateOne({ _id: payment.discount }, { $inc: { usedCount: 1 } }, { session })
-//         }
-//       }
-
-//       await session.commitTransaction()
-//       return res.status(200).json({ status: 'success' })
-//     } catch (enrollmentError) {
-//       console.error('Enrollment processing error:', enrollmentError)
-//       payment.status = 'failed'
-//       payment.failureReason = 'Enrollment processing failed'
-//       payment.ipnResponse.enrollmentError = enrollmentError.message
-//       await payment.save({ session })
-//       await session.abortTransaction()
-//       return res.status(200).json({ status: 'error' })
-//     }
+//     return res.status(200).json({ status: 'success' })
 //   } catch (error) {
 //     console.error('IPN handling error:', error)
 //     await session.abortTransaction()
 //     return res.status(200).json({ status: 'error' })
-//   } finally {
-//     session.endSession()
-//   }
-// }
-
-// exports.handlePaymentRedirect = async (req, res, next) => {
-//   const session = await mongoose.startSession()
-//   session.startTransaction()
-
-//   try {
-//     const { status, tran_id, val_id } = req.body
-
-//     // Find the payment record
-//     const payment = await Payment.findOne({
-//       transactionId: tran_id,
-//       status: { $in: ['pending', 'processing'] },
-//     }).session(session)
-
-//     if (!payment) {
-//       console.error('Payment not found for transaction:', tran_id)
-//       await session.abortTransaction()
-//       return res.redirect(`${process.env.FRONTEND_URL}/payment/verify-payment/error?message=invalid_transaction`)
-//     }
-
-//     // Determine redirect status
-//     let redirectStatus
-//     switch (status?.toUpperCase()) {
-//       case 'VALID':
-//         redirectStatus = 'success'
-//         // Process enrollment immediately for successful payments
-//         if (redirectStatus === 'success') {
-//           try {
-//             await processEnrollment(payment.user, payment.course, payment.purchaseType, payment.modules || [], session)
-
-//             // Update payment status
-//             payment.status = 'completed'
-//             payment.completedAt = new Date()
-//             await payment.save({ session })
-
-//             // Update course total students if needed
-//             const existingEnrollment = await User.findOne({
-//               _id: payment.user,
-//               'enrolledCourses.course': payment.course,
-//             }).session(session)
-
-//             if (!existingEnrollment) {
-//               await Course.updateOne({ _id: payment.course }, { $inc: { totalStudents: 1 } }, { session })
-//             }
-
-//             // Update discount usage if applicable
-//             if (payment.discount) {
-//               await Discount.updateOne({ _id: payment.discount }, { $inc: { usedCount: 1 } }, { session })
-//             }
-//           } catch (enrollmentError) {
-//             console.error('Enrollment processing error:', enrollmentError)
-//             redirectStatus = 'failed'
-//           }
-//         }
-//         break
-//       case 'FAILED':
-//         redirectStatus = 'failed'
-//         break
-//       case 'CANCELLED':
-//         redirectStatus = 'cancelled'
-//         break
-//       default:
-//         redirectStatus = 'failed'
-//     }
-
-//     // Update payment with redirect response
-//     await Payment.updateOne(
-//       { transactionId: tran_id },
-//       {
-//         $set: {
-//           redirectResponse: req.body,
-//           redirectStatus,
-//           updatedAt: new Date(),
-//         },
-//       },
-//       { session }
-//     )
-
-//     await session.commitTransaction()
-
-//     // Handle different status cases for redirect
-//     let redirectUrl = process.env.FRONTEND_URL
-//     switch (redirectStatus) {
-//       case 'success':
-//         redirectUrl += `/payment/verify-payment/success?tran_id=${tran_id}&val_id=${val_id}`
-//         break
-//       case 'failed':
-//         redirectUrl += `/payment/verify-payment/failed?tran_id=${tran_id}`
-//         break
-//       case 'cancelled':
-//         redirectUrl += `/payment/verify-payment/cancelled?tran_id=${tran_id}`
-//         break
-//       default:
-//         redirectUrl += `/payment/verify-payment/error?message=invalid_status`
-//     }
-
-//     redirectUrl += `&amount=${payment.amount}`
-//     res.redirect(redirectUrl)
-//   } catch (error) {
-//     console.error('Payment redirect handling error:', error)
-//     await session.abortTransaction()
-//     res.redirect(`${process.env.FRONTEND_URL}/payment/verify-payment/error?message=server_error`)
 //   } finally {
 //     session.endSession()
 //   }
