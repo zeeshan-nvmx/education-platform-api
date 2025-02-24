@@ -620,7 +620,7 @@ exports.getCourse = async (req, res, next) => {
       .populate('creator', 'firstName lastName email')
       .populate({
         path: 'modules',
-        select: 'title description order prerequisites isAccessible dependencies price',
+        select: 'title description order price prerequisites isAccessible dependencies',
         options: { sort: { order: 1 } },
         populate: {
           path: 'lessons',
@@ -715,6 +715,7 @@ exports.getCourse = async (req, res, next) => {
           title: module.title || '',
           description: module.description || '',
           order: module.order || 0,
+          price: module.price || 0,
           totalLessons: Array.isArray(module.lessons) ? module.lessons.length : 0,
           isAccessible: !!module.isAccessible,
           prerequisites: Array.isArray(module.prerequisites) ? module.prerequisites : [],
