@@ -689,8 +689,15 @@ exports.getCourse = async (req, res, next) => {
       return next(new AppError('Invalid course ID', 400))
     }
 
+    const courseId = req.params.courseId
+    console.log(`Getting course details for course ID: ${courseId}`)
+
+    // Check if the user is authenticated
+    const userId = req.user?._id
+    console.log(`User ID from request: ${userId}`)
+
     const course = await Course.findOne({
-      _id: req.params.courseId,
+      _id: courseId,
     })
       .populate('creator', 'firstName lastName email')
       .populate({
@@ -713,21 +720,44 @@ exports.getCourse = async (req, res, next) => {
       return next(new AppError('Course not found', 404))
     }
 
+    console.log(`Found course: ${course.title}`)
+
     // Check for authenticated user
     let authenticatedUser = null
-    if (req.user && req.user._id) {
-      // Include the full enrolledCourses with enrolledModules
-      authenticatedUser = await User.findOne({ _id: req.user._id }, { enrolledCourses: 1, 'enrolledCourses.enrolledModules': 1, role: 1 }).lean()
+    let enrollment = null
+
+    if (userId) {
+      // Fetch the full user to get enrollment data
+      authenticatedUser = await User.findById(userId)
+      console.log(`Found authenticated user: ${authenticatedUser?.firstName} ${authenticatedUser?.lastName}`)
+
+      // Log the user's enrolled courses
+      console.log(`User enrolled courses count: ${authenticatedUser?.enrolledCourses?.length || 0}`)
+
+      // Find enrollment for this specific course
+      if (authenticatedUser?.enrolledCourses?.length) {
+        enrollment = authenticatedUser.enrolledCourses.find((ec) => ec.course && ec.course.toString() === courseId)
+
+        if (enrollment) {
+          console.log(`User has enrollment for this course. Type: ${enrollment.enrollmentType}`)
+          console.log(`Enrolled modules count: ${enrollment.enrolledModules?.length || 0}`)
+
+          // Log each enrolled module
+          if (enrollment.enrolledModules?.length) {
+            enrollment.enrolledModules.forEach((em, index) => {
+              console.log(`Module ${index + 1}: ${em.module}`)
+            })
+          }
+        } else {
+          console.log('User does not have enrollment for this course')
+        }
+      }
     }
 
-    // Determine roles and enrollment
+    // Determine roles
     const isCreator = authenticatedUser && course.creator && course.creator._id.toString() === authenticatedUser._id.toString()
     const isAdmin = authenticatedUser?.role === 'admin'
-
-    let enrollment = null
-    if (authenticatedUser?.enrolledCourses?.length) {
-      enrollment = authenticatedUser.enrolledCourses.find((ec) => ec.course && ec.course.toString() === course._id.toString())
-    }
+    console.log(`User roles - Creator: ${isCreator}, Admin: ${isAdmin}`)
 
     const courseDetails = {
       _id: course._id,
@@ -775,6 +805,7 @@ exports.getCourse = async (req, res, next) => {
     }
 
     const hasFullAccess = isCreator || isAdmin || (enrollment && enrollment.enrollmentType === 'full')
+    console.log(`User has full access: ${hasFullAccess}`)
 
     // Create a map of enrolled module IDs for quick lookup
     const enrolledModuleIds = new Set()
@@ -785,6 +816,7 @@ exports.getCourse = async (req, res, next) => {
         }
       })
     }
+    console.log(`Enrolled module IDs: ${Array.from(enrolledModuleIds).join(', ')}`)
 
     const modules = Array.isArray(course.modules) ? course.modules : []
     courseDetails.modules = modules
@@ -793,6 +825,8 @@ exports.getCourse = async (req, res, next) => {
 
         const moduleId = module._id.toString()
         const hasModuleAccess = hasFullAccess || enrolledModuleIds.has(moduleId)
+
+        console.log(`Module ${moduleId} (${module.title}) - User has access: ${hasModuleAccess}`)
 
         const moduleData = {
           _id: module._id,
@@ -888,30 +922,36 @@ exports.getCourse = async (req, res, next) => {
       })
       .filter(Boolean)
 
+    // Always include enrollment data if user is authenticated and has any enrollment
     if (enrollment) {
-      // Format the enrolledModules array properly
-      const formattedEnrolledModules = Array.isArray(enrollment.enrolledModules)
-        ? enrollment.enrolledModules
-            .map((em) => {
-              if (!em || !em.module) return null
+      console.log('Including enrollment data in response')
 
-              return {
-                module: em.module,
-                enrolledAt: em.enrolledAt || enrollment.enrolledAt || new Date(),
-                // Include other fields that might be needed by frontend
-                completedLessons: Array.isArray(em.completedLessons) ? em.completedLessons : [],
-                completedQuizzes: Array.isArray(em.completedQuizzes) ? em.completedQuizzes : [],
-                lastAccessed: em.lastAccessed || enrollment.enrolledAt || new Date(),
-              }
-            })
-            .filter(Boolean)
-        : []
+      // Format the enrolledModules array properly
+      const formattedEnrolledModules = []
+
+      if (Array.isArray(enrollment.enrolledModules)) {
+        for (const em of enrollment.enrolledModules) {
+          if (!em || !em.module) continue
+
+          formattedEnrolledModules.push({
+            module: em.module,
+            enrolledAt: em.enrolledAt || enrollment.enrolledAt || new Date(),
+            completedLessons: Array.isArray(em.completedLessons) ? em.completedLessons : [],
+            completedQuizzes: Array.isArray(em.completedQuizzes) ? em.completedQuizzes : [],
+            lastAccessed: em.lastAccessed || enrollment.enrolledAt || new Date(),
+          })
+        }
+      }
+
+      console.log(`Formatted enrolled modules count: ${formattedEnrolledModules.length}`)
 
       courseDetails.enrollment = {
         type: enrollment.enrollmentType,
         enrolledAt: enrollment.enrolledAt,
         enrolledModules: formattedEnrolledModules,
       }
+    } else {
+      console.log('No enrollment data to include')
     }
 
     courseDetails.statistics = {
@@ -927,10 +967,15 @@ exports.getCourse = async (req, res, next) => {
       ),
     }
 
-    res.status(200).json({
+    const finalResponse = {
       message: 'Course fetched successfully',
       data: courseDetails,
-    })
+    }
+
+    // Log the enrollment part of the response before sending
+    console.log('Enrollment in response:', JSON.stringify(finalResponse.data.enrollment))
+
+    res.status(200).json(finalResponse)
   } catch (error) {
     console.error('Error in getCourse:', error)
     next(error)
