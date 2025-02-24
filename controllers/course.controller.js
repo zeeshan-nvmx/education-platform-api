@@ -371,7 +371,10 @@ exports.getAllCourses = async (req, res, next) => {
 
 // exports.getCourse = async (req, res, next) => {
 //   try {
-    
+//     if (!mongoose.Types.ObjectId.isValid(req.params.courseId)) {
+//       return next(new AppError('Invalid course ID', 400))
+//     }
+
 //     const course = await Course.findOne({
 //       _id: req.params.courseId,
 //     })
@@ -396,25 +399,19 @@ exports.getAllCourses = async (req, res, next) => {
 //       return next(new AppError('Course not found', 404))
 //     }
 
-//     // Check for authenticated user, but ONLY fetch data if user is present.
+//     // Check for authenticated user
 //     let authenticatedUser = null
 //     if (req.user && req.user._id) {
-      
 //       authenticatedUser = await User.findOne({ _id: req.user._id }, { enrolledCourses: 1, role: 1 }).lean()
 //     }
 
-//     // Determine roles and enrollment 
+//     // Determine roles and enrollment
 //     const isCreator = authenticatedUser && course.creator && course.creator._id.toString() === authenticatedUser._id.toString()
 //     const isAdmin = authenticatedUser?.role === 'admin'
 
 //     let enrollment = null
 //     if (authenticatedUser?.enrolledCourses?.length) {
 //       enrollment = authenticatedUser.enrolledCourses.find((ec) => ec.course && ec.course.toString() === course._id.toString())
-//     }
-
-//     let creatorEmail = undefined
-//     if (isAdmin || isCreator) {
-//       creatorEmail = course.creator ? course.creator.email : undefined
 //     }
 
 //     const courseDetails = {
@@ -431,9 +428,9 @@ exports.getAllCourses = async (req, res, next) => {
 //       creator: course.creator
 //         ? {
 //             name: `${course.creator.firstName || ''} ${course.creator.lastName || ''}`.trim(),
-//             email: creatorEmail, 
+//             email: isAdmin || isCreator ? course.creator.email : undefined,
 //           }
-//         : { name: 'Unknown Creator' }, // Default if no creator
+//         : { name: 'Unknown Creator' },
 //       instructors: Array.isArray(course.instructors)
 //         ? course.instructors.map((instructor) => ({
 //             name: instructor.name || '',
@@ -481,22 +478,21 @@ exports.getAllCourses = async (req, res, next) => {
 //           order: module.order || 0,
 //           price: module.price || 0,
 //           totalLessons: Array.isArray(module.lessons) ? module.lessons.length : 0,
+//           isAccessible: !!module.isAccessible,
+//           prerequisites: Array.isArray(module.prerequisites) ? module.prerequisites : [],
+//         }
+
+//         const currentProgress = moduleProgress[moduleId]
+//         if (currentProgress) {
+//           moduleData.progress = {
+//             completedLessons: Array.isArray(currentProgress.completedLessons) ? currentProgress.completedLessons.length : 0,
+//             completedQuizzes: Array.isArray(currentProgress.completedQuizzes) ? currentProgress.completedQuizzes.length : 0,
+//             progress: currentProgress.progress || 0,
+//             lastAccessed: currentProgress.lastAccessed || null,
+//           }
 //         }
 
 //         if (hasModuleAccess) {
-//           moduleData.isAccessible = !!module.isAccessible
-//           moduleData.prerequisites = Array.isArray(module.prerequisites) ? module.prerequisites : []
-
-//           const currentProgress = moduleProgress[moduleId]
-//           if (currentProgress) {
-//             moduleData.progress = {
-//               completedLessons: Array.isArray(currentProgress.completedLessons) ? currentProgress.completedLessons.length : 0,
-//               completedQuizzes: Array.isArray(currentProgress.completedQuizzes) ? currentProgress.completedQuizzes.length : 0,
-//               progress: currentProgress.progress || 0,
-//               lastAccessed: currentProgress.lastAccessed || null,
-//             }
-//           }
-
 //           const lessons = Array.isArray(module.lessons) ? module.lessons : []
 //           moduleData.lessons = lessons
 //             .map((lesson) => {
@@ -571,17 +567,9 @@ exports.getAllCourses = async (req, res, next) => {
 
 //     if (enrollment) {
 //       courseDetails.enrollment = {
-//         type: enrollment.enrollmentType || 'module',
-//         enrolledAt: enrollment.enrolledAt || new Date(),
-//         enrolledModules: Array.isArray(enrollment.enrolledModules)
-//           ? enrollment.enrolledModules
-//               .map((em) => ({
-//                 moduleId: em?.module?.toString() || '',
-//                 enrolledAt: em?.enrolledAt || new Date(),
-//                 lastAccessed: em?.lastAccessed || new Date(),
-//               }))
-//               .filter((em) => em.moduleId)
-//           : [],
+//         type: enrollment.enrollmentType,
+//         enrolledAt: enrollment.enrolledAt,
+//         enrolledModules: [], // Match the exact format from your original response
 //       }
 //     }
 
@@ -604,6 +592,93 @@ exports.getAllCourses = async (req, res, next) => {
 //     })
 //   } catch (error) {
 //     console.error('Error in getCourse:', error)
+//     next(error)
+//   }
+// }
+
+
+
+// exports.updateCourse = async (req, res, next) => {
+//   let newUploadedImageKeys = []
+
+//   try {
+//     const courseData = JSON.parse(req.body.courseData || '{}')
+//     const { error, value } = courseSchema.validate(courseData)
+
+//     if (error) {
+//       return res.status(400).json({
+//         status: 'error',
+//         errors: error.details.map((detail) => ({
+//           field: detail.context.key,
+//           message: detail.message,
+//         })),
+//       })
+//     }
+
+//     if (Object.keys(value).length === 0 && !req.files) {
+//       return next(new AppError('No update data provided', 400))
+//     }
+
+//     const course = await Course.findById(req.params.courseId)
+//     if (!course) {
+//       return next(new AppError('Course not found', 404))
+//     }
+
+//     if (value.modulePrice && value.modulePrice > (value.price || course.price)) {
+//       return next(new AppError('Module price cannot be greater than course price', 400))
+//     }
+
+//     if (req.files?.thumbnail?.[0]) {
+//       if (course.thumbnailKey) {
+//         await deleteFromS3(course.thumbnailKey).catch(console.error)
+//       }
+//       const thumbnailKey = `course-thumbnails/${Date.now()}-${req.files.thumbnail[0].originalname}`
+//       const thumbnailUrl = await uploadToS3(req.files.thumbnail[0], thumbnailKey)
+//       value.thumbnail = thumbnailUrl
+//       value.thumbnailKey = thumbnailKey
+//       newUploadedImageKeys.push(thumbnailKey)
+//     }
+
+//     if (value.instructors) {
+//       const oldInstructorImageKeys = course.instructors.filter((inst) => inst.imageKey).map((inst) => inst.imageKey)
+
+//       const instructorsWithImages = await handleInstructorImages(value.instructors, req.files?.instructorImages)
+
+//       newUploadedImageKeys = newUploadedImageKeys.concat(instructorsWithImages.filter((inst) => inst.imageKey).map((inst) => inst.imageKey))
+
+//       value.instructors = instructorsWithImages
+//       await cleanupInstructorImages(oldInstructorImageKeys)
+//     }
+
+//     if (value.description) {
+//       value.description = sanitizeHtml(value.description, {
+//         allowedTags: ['b', 'i', 'em', 'strong', 'p', 'br'],
+//         allowedAttributes: {},
+//       })
+//     }
+
+//     if (value.title && value.title !== course.title) {
+//       const existingCourse = await Course.findOne({
+//         title: value.title,
+//         _id: { $ne: req.params.courseId },
+//       })
+//       if (existingCourse) {
+//         await cleanupInstructorImages(newUploadedImageKeys)
+//         return next(new AppError('A course with this title already exists', 400))
+//       }
+//     }
+
+//     const updatedCourse = await Course.findByIdAndUpdate(req.params.courseId, { ...value }, { new: true, runValidators: true }).populate(
+//       'creator',
+//       'firstName lastName email'
+//     )
+
+//     res.status(200).json({
+//       message: 'Course updated successfully',
+//       data: updatedCourse,
+//     })
+//   } catch (error) {
+//     await cleanupInstructorImages(newUploadedImageKeys)
 //     next(error)
 //   }
 // }
@@ -641,7 +716,8 @@ exports.getCourse = async (req, res, next) => {
     // Check for authenticated user
     let authenticatedUser = null
     if (req.user && req.user._id) {
-      authenticatedUser = await User.findOne({ _id: req.user._id }, { enrolledCourses: 1, role: 1 }).lean()
+      // Include the full enrolledCourses with enrolledModules
+      authenticatedUser = await User.findOne({ _id: req.user._id }, { enrolledCourses: 1, 'enrolledCourses.enrolledModules': 1, role: 1 }).lean()
     }
 
     // Determine roles and enrollment
@@ -700,15 +776,23 @@ exports.getCourse = async (req, res, next) => {
 
     const hasFullAccess = isCreator || isAdmin || (enrollment && enrollment.enrollmentType === 'full')
 
+    // Create a map of enrolled module IDs for quick lookup
+    const enrolledModuleIds = new Set()
+    if (enrollment && Array.isArray(enrollment.enrolledModules)) {
+      enrollment.enrolledModules.forEach((em) => {
+        if (em && em.module) {
+          enrolledModuleIds.add(em.module.toString())
+        }
+      })
+    }
+
     const modules = Array.isArray(course.modules) ? course.modules : []
     courseDetails.modules = modules
       .map((module) => {
         if (!module) return null
 
         const moduleId = module._id.toString()
-        const hasModuleAccess =
-          hasFullAccess ||
-          (enrollment && Array.isArray(enrollment.enrolledModules) && enrollment.enrolledModules.some((em) => em && em.module && em.module.toString() === moduleId))
+        const hasModuleAccess = hasFullAccess || enrolledModuleIds.has(moduleId)
 
         const moduleData = {
           _id: module._id,
@@ -805,10 +889,28 @@ exports.getCourse = async (req, res, next) => {
       .filter(Boolean)
 
     if (enrollment) {
+      // Format the enrolledModules array properly
+      const formattedEnrolledModules = Array.isArray(enrollment.enrolledModules)
+        ? enrollment.enrolledModules
+            .map((em) => {
+              if (!em || !em.module) return null
+
+              return {
+                module: em.module,
+                enrolledAt: em.enrolledAt || enrollment.enrolledAt || new Date(),
+                // Include other fields that might be needed by frontend
+                completedLessons: Array.isArray(em.completedLessons) ? em.completedLessons : [],
+                completedQuizzes: Array.isArray(em.completedQuizzes) ? em.completedQuizzes : [],
+                lastAccessed: em.lastAccessed || enrollment.enrolledAt || new Date(),
+              }
+            })
+            .filter(Boolean)
+        : []
+
       courseDetails.enrollment = {
         type: enrollment.enrollmentType,
         enrolledAt: enrollment.enrolledAt,
-        enrolledModules: [], // Match the exact format from your original response
+        enrolledModules: formattedEnrolledModules,
       }
     }
 
@@ -834,93 +936,6 @@ exports.getCourse = async (req, res, next) => {
     next(error)
   }
 }
-
-
-
-// exports.updateCourse = async (req, res, next) => {
-//   let newUploadedImageKeys = []
-
-//   try {
-//     const courseData = JSON.parse(req.body.courseData || '{}')
-//     const { error, value } = courseSchema.validate(courseData)
-
-//     if (error) {
-//       return res.status(400).json({
-//         status: 'error',
-//         errors: error.details.map((detail) => ({
-//           field: detail.context.key,
-//           message: detail.message,
-//         })),
-//       })
-//     }
-
-//     if (Object.keys(value).length === 0 && !req.files) {
-//       return next(new AppError('No update data provided', 400))
-//     }
-
-//     const course = await Course.findById(req.params.courseId)
-//     if (!course) {
-//       return next(new AppError('Course not found', 404))
-//     }
-
-//     if (value.modulePrice && value.modulePrice > (value.price || course.price)) {
-//       return next(new AppError('Module price cannot be greater than course price', 400))
-//     }
-
-//     if (req.files?.thumbnail?.[0]) {
-//       if (course.thumbnailKey) {
-//         await deleteFromS3(course.thumbnailKey).catch(console.error)
-//       }
-//       const thumbnailKey = `course-thumbnails/${Date.now()}-${req.files.thumbnail[0].originalname}`
-//       const thumbnailUrl = await uploadToS3(req.files.thumbnail[0], thumbnailKey)
-//       value.thumbnail = thumbnailUrl
-//       value.thumbnailKey = thumbnailKey
-//       newUploadedImageKeys.push(thumbnailKey)
-//     }
-
-//     if (value.instructors) {
-//       const oldInstructorImageKeys = course.instructors.filter((inst) => inst.imageKey).map((inst) => inst.imageKey)
-
-//       const instructorsWithImages = await handleInstructorImages(value.instructors, req.files?.instructorImages)
-
-//       newUploadedImageKeys = newUploadedImageKeys.concat(instructorsWithImages.filter((inst) => inst.imageKey).map((inst) => inst.imageKey))
-
-//       value.instructors = instructorsWithImages
-//       await cleanupInstructorImages(oldInstructorImageKeys)
-//     }
-
-//     if (value.description) {
-//       value.description = sanitizeHtml(value.description, {
-//         allowedTags: ['b', 'i', 'em', 'strong', 'p', 'br'],
-//         allowedAttributes: {},
-//       })
-//     }
-
-//     if (value.title && value.title !== course.title) {
-//       const existingCourse = await Course.findOne({
-//         title: value.title,
-//         _id: { $ne: req.params.courseId },
-//       })
-//       if (existingCourse) {
-//         await cleanupInstructorImages(newUploadedImageKeys)
-//         return next(new AppError('A course with this title already exists', 400))
-//       }
-//     }
-
-//     const updatedCourse = await Course.findByIdAndUpdate(req.params.courseId, { ...value }, { new: true, runValidators: true }).populate(
-//       'creator',
-//       'firstName lastName email'
-//     )
-
-//     res.status(200).json({
-//       message: 'Course updated successfully',
-//       data: updatedCourse,
-//     })
-//   } catch (error) {
-//     await cleanupInstructorImages(newUploadedImageKeys)
-//     next(error)
-//   }
-// }
 
 exports.updateCourse = async (req, res, next) => {
   let newUploadedImageKeys = []

@@ -544,10 +544,8 @@ exports.initiateCoursePayment = async (req, res, next) => {
 // }
 
 exports.initiateModulePayment = async (req, res, next) => {
-  const session = await mongoose.startSession()
-  session.startTransaction()
-
   try {
+    // Validate the request
     const { error, value } = initiateModulePaymentSchema.validate(req.body)
     if (error) {
       return res.status(400).json({
@@ -560,74 +558,61 @@ exports.initiateModulePayment = async (req, res, next) => {
     }
 
     const { moduleIds } = value
+    console.log('Requested module IDs:', moduleIds)
 
-    // Log the module IDs for debugging
-    console.log('Module IDs requested:', moduleIds)
-
-    // Find course and modules with explicit selection of fields
-    const [course, modules] = await Promise.all([
-      Course.findOne({
-        _id: req.params.courseId,
-        isDeleted: false,
-      }).session(session),
-
-      // Explicitly select fields including price
-      Module.find({
-        _id: { $in: moduleIds },
-        course: req.params.courseId,
-        isDeleted: false,
-      })
-        .select('_id title price')
-        .session(session),
-    ])
+    // Find the course and modules (no transaction)
+    const course = await Course.findOne({
+      _id: req.params.courseId,
+      isDeleted: false,
+    })
 
     if (!course) {
-      await session.abortTransaction()
       return next(new AppError('Course not found', 404))
     }
 
+    console.log('Found course:', course._id.toString(), course.title, 'Full price:', course.price)
+
+    const modules = await Module.find({
+      _id: { $in: moduleIds },
+      course: req.params.courseId,
+      isDeleted: false,
+    }).select('_id title price')
+
     if (modules.length !== moduleIds.length) {
-      await session.abortTransaction()
-      return next(new AppError('One or more modules not found', 404))
+      const foundIds = modules.map((m) => m._id.toString())
+      const missingIds = moduleIds.filter((id) => !foundIds.includes(id))
+      console.error('Missing modules:', missingIds)
+      return next(new AppError(`One or more modules not found: ${missingIds.join(', ')}`, 404))
     }
 
-    // Debug log module prices
-    console.log('Modules found:', modules.length)
-    console.log(
-      'Module details:',
-      modules.map((m) => ({
-        id: m._id.toString(),
-        title: m.title,
-        price: m.price,
-      }))
-    )
-
-    // Calculate total amount with proper number conversion
-    const totalAmount = modules.reduce((sum, module) => {
+    // Calculate the total price
+    let totalAmount = 0
+    modules.forEach((module) => {
+      console.log(`Module ${module._id.toString()} - ${module.title}: Price = ${module.price}`)
       const modulePrice = Number(module.price)
       if (isNaN(modulePrice)) {
-        console.warn(`Invalid module price for ${module._id}: ${module.price}`)
-        return sum
+        throw new AppError(`Invalid price for module: ${module.title}`, 400)
       }
-      return sum + modulePrice
-    }, 0)
+      console.log(`Adding price ${modulePrice} for module ${module.title}`)
+      totalAmount += modulePrice
+    })
 
-    console.log('Calculated total amount for modules:', totalAmount)
+    console.log('Calculated total module price:', totalAmount)
 
-    // Check for access to these specific modules
+    // Verify access
     const hasAccess = !(await verifyAccess(req.user._id, course._id, moduleIds))
     if (hasAccess) {
-      await session.abortTransaction()
       return next(new AppError('You already have access to one or more of these modules', 400))
     }
 
     // Calculate any discounts
     const { discountedAmount, discount } = await calculateDiscountedAmount(totalAmount, value.discountCode, course._id)
-    console.log('Discounted amount:', discountedAmount)
+    console.log('Final price after discount:', discountedAmount)
 
+    // Generate transaction ID
     const transactionId = crypto.randomBytes(16).toString('hex')
 
-    // Prepare SSLCommerz data with the correct amount
+    // Prepare SSL data
     const sslData = {
       store_id: process.env.SSLCOMMERZ_STORE_ID,
       store_passwd: process.env.SSLCOMMERZ_STORE_PASSWORD,
@@ -638,7 +623,7 @@ exports.initiateModulePayment = async (req, res, next) => {
       fail_url: `${process.env.API_BASE_URL}/api/payments/redirect`,
       cancel_url: `${process.env.API_BASE_URL}/api/payments/redirect`,
       ipn_url: `${process.env.API_BASE_URL}/api/payments/ipn`,
-      product_name: `${course.title} - ${modules.length} Module${modules.length > 1 ? 's' : ''}`,
+      product_name: `${modules.length} Module(s) from ${course.title}`,
       product_category: 'Course Modules',
       product_profile: 'non-physical-goods',
       cus_name: `${req.user.firstName} ${req.user.lastName}`,
@@ -656,55 +641,42 @@ exports.initiateModulePayment = async (req, res, next) => {
       value_d: moduleIds.join(','),
     }
 
-    console.log('Final amount sent to SSLCommerz:', discountedAmount)
+    console.log('Amount being sent to SSLCommerz:', sslData.total_amount)
 
-    // Create payment record
-    const payment = await Payment.create(
-      [
-        {
-          user: req.user._id,
-          course: course._id,
-          purchaseType: 'module',
-          modules: moduleIds,
-          amount: totalAmount,
-          discount,
-          discountedAmount,
-          transactionId,
-          customerDetails: {
-            name: `${req.user.firstName} ${req.user.lastName}`,
-            email: req.user.email,
-            ...value.shippingAddress,
-          },
-          status: 'pending',
-          redirectStatus: 'pending',
-          ipnStatus: 'pending',
-          createdAt: new Date(),
-        },
-      ],
-      { session }
-    )
-
-    // Initiate payment with SSLCommerz
+    // First initialize payment with SSLCommerz
     const sslResponse = await initiatePayment(sslData)
 
     if (!sslResponse?.GatewayPageURL || !sslResponse?.sessionkey) {
-      await session.abortTransaction()
+      console.error('SSLCommerz initialization failed:', sslResponse)
       return next(new AppError('Failed to initialize payment gateway', 500))
     }
 
-    // Update payment record with SSLCommerz session info
-    await Payment.findByIdAndUpdate(
-      payment[0]._id,
-      {
-        sslcommerzSessionKey: sslResponse.sessionkey,
-        gatewayPageURL: sslResponse.GatewayPageURL,
+    // create payment record
+    const paymentData = {
+      user: req.user._id,
+      course: course._id,
+      purchaseType: 'module',
+      modules: moduleIds,
+      amount: totalAmount,
+      discount: discount,
+      discountedAmount: discountedAmount,
+      transactionId: transactionId,
+      customerDetails: {
+        name: `${req.user.firstName} ${req.user.lastName}`,
+        email: req.user.email,
+        ...value.shippingAddress,
       },
-      { session }
-    )
+      status: 'pending',
+      redirectStatus: 'pending',
+      ipnStatus: 'pending',
+      sslcommerzSessionKey: sslResponse.sessionkey,
+      gatewayPageURL: sslResponse.GatewayPageURL,
+    }
 
-    await session.commitTransaction()
+    const payment = await Payment.create(paymentData)
+    console.log('Payment record created:', payment._id)
 
-    // Return success response with gateway URL
+    // Return success response
     res.status(200).json({
       status: 'success',
       message: 'Module payment initialized successfully',
@@ -712,15 +684,13 @@ exports.initiateModulePayment = async (req, res, next) => {
         transactionId,
         amount: discountedAmount,
         modulesCount: modules.length,
+        moduleDetails: modules.map((m) => ({ id: m._id.toString(), title: m.title, price: m.price })),
         gatewayRedirectURL: sslResponse.GatewayPageURL,
       },
     })
   } catch (error) {
     console.error('Module payment initialization error:', error)
-    await session.abortTransaction()
     next(error)
-  } finally {
-    session.endSession()
   }
 }
 
