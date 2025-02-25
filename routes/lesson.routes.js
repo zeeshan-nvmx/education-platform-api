@@ -2,6 +2,7 @@ const express = require('express')
 const { protect, restrictTo } = require('../middleware/auth')
 const validateMongoId = require('../middleware/validateMongoId')
 const { uploadVideo, uploadAsset } = require('../middleware/upload')
+const quizRouter = require('./quiz.routes')
 
 const {
   createLesson,
@@ -23,10 +24,12 @@ const parseFormDataJSON = require('../middleware/parseFormData')
 
 const router = express.Router({ mergeParams: true })
 
+// Mount quiz router
+router.use('/:lessonId/quiz', quizRouter)
+
 // Basic lesson routes
 router.get('/', protect, getLessons)
 router.get('/:lessonId', protect, validateMongoId, getLesson)
-
 
 
 // Lesson creation/management (Admin/SubAdmin only)

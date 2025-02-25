@@ -505,235 +505,155 @@ lessonSchema.pre('findOne', function () {
   this.where({ isDeleted: false })
 })
 
-// Quiz Schema
-const quizSchema = new mongoose.Schema(
-  {
-    lesson: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Lesson',
-      required: true,
-      index: true,
-    },
-    title: {
+// Question Schema (sub-document)
+const questionSchema = new mongoose.Schema({
+  question: {
+    type: String,
+    required: true,
+  },
+  type: {
+    type: String,
+    enum: ['mcq', 'text'],
+    required: true
+  },
+  // For MCQ questions
+  options: [{
+    option: {
       type: String,
-      required: true,
-      trim: true,
-    },
-    description: String,
-    instructions: String,
-    duration: {
-      type: Number, // in minutes
-      required: true,
-      min: 1
-    },
-    passingScore: {
-      type: Number,
-      required: true,
-      min: 0,
-      max: 100,
-    },
-    maxAttempts: {
-      type: Number,
-      required: true,
-      default: 3,
-      min: 1
-    },
-    shuffleQuestions: {
-      type: Boolean,
-      default: false
-    },
-    shuffleOptions: {
-      type: Boolean,
-      default: false
-    },
-    showResults: {
-      type: Boolean, // Whether to show correct answers after submission
-      default: true
-    },
-    questions: [{
-      questionText: {
-        type: String,
-        required: true
-      },
-      type: {
-        type: String,
-        enum: ['mcq', 'fillInGaps', 'essay'],
-        required: true
-      },
-      marks: {
-        type: Number,
-        required: true,
-        default: 1
-      },
-      // For MCQ
-      options: [{
-        text: String,
-        isCorrect: Boolean
-      }],
-      // For fill in gaps
-      gapAnswers: [{
-        position: Number,
-        correctAnswer: String,
-        caseSensitive: {
-          type: Boolean,
-          default: false
-        },
-        alternativeAnswers: [String] // Accept multiple possible answers
-      }],
-      // For essay questions
-      rubric: {
-        criteria: [{
-          name: String,
-          description: String,
-          maxScore: Number
-        }],
-        totalMarks: Number
-      },
-      explanation: String // Explanation shown after attempt (if showResults is true)
-    }],
-    totalMarks: {
-      type: Number,
       required: true
     },
-    requireManualGrading: {
+    isCorrect: {
       type: Boolean,
-      default: false
-    },
-    gradingInProgress: {
-      type: Boolean,
-      default: false
-    },
-    isDeleted: {
-      type: Boolean,
-      default: false,
-      index: true,
-    },
-  },
-  { 
-    timestamps: true,
-    toJSON: { virtuals: true },
-    toObject: { virtuals: true }
+      required: true
+    }
+  }],
+  marks: {
+    type: Number,
+    required: true,
+    default: 1
   }
-)
+});
 
-// Quiz schema middleware to calculate total marks
+// Quiz Schema
+const quizSchema = new mongoose.Schema({
+  lesson: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Lesson',
+    required: true,
+    index: true
+  },
+  title: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  quizTime: {
+    type: Number, // in minutes
+    required: true,
+    min: 1
+  },
+  passingScore: {
+    type: Number,
+    required: true,
+    min: 0,
+    max: 100,
+    default: 50
+  },
+  maxAttempts: {
+    type: Number,
+    required: true,
+    default: 3,
+    min: 1
+  },
+  questions: [questionSchema],
+  totalMarks: {
+    type: Number,
+    required: true
+  },
+  isDeleted: {
+    type: Boolean,
+    default: false,
+    index: true
+  }
+}, {
+  timestamps: true
+});
+
+// Calculate total marks before saving
 quizSchema.pre('save', function(next) {
   if (this.isModified('questions')) {
-    this.totalMarks = this.questions.reduce((sum, question) => sum + question.marks, 0)
-    this.requireManualGrading = this.questions.some(q => q.type === 'essay')
+    this.totalMarks = this.questions.reduce((sum, q) => sum + q.marks, 0);
   }
-  next()
-})
+  next();
+});
 
 // Quiz Attempt Schema
-const quizAttemptSchema = new mongoose.Schema(
-  {
-    quiz: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Quiz',
-      required: true,
-      index: true,
-    },
-    user: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true,
-      index: true,
-    },
-    startedAt: {
-      type: Date,
-      required: true,
-    },
-    submittedAt: {
-      type: Date,
-      index: true,
-    },
-    answers: [{
-      question: {
-        type: mongoose.Schema.Types.ObjectId,
-        required: true,
-      },
-      type: {
-        type: String,
-        enum: ['mcq', 'fillInGaps', 'essay'],
-        required: true,
-      },
-      // For MCQ
-      selectedOptions: [{
-        type: String
-      }],
-      // For fill in gaps
-      gapAnswers: [{
-        position: Number,
-        answer: String
-      }],
-      // For essay
-      essayAnswer: {
-        text: String,
-        attachments: [{
-          url: String,
-          key: String,
-          name: String,
-          type: String
-        }]
-      },
-      // Grading
-      marks: Number,
-      feedback: String,
-      rubricScores: [{
-        criteriaName: String,
-        score: Number,
-        feedback: String
-      }],
-      isCorrect: Boolean,
-      autoGraded: Boolean
-    }],
-    score: Number,
-    percentage: Number,
-    passed: Boolean,
-    attempt: {
-      type: Number,
-      required: true,
-    },
-    gradedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
-    },
-    gradingComplete: {
-      type: Boolean,
-      default: false,
-      index: true
-    },
-    status: {
-      type: String,
-      enum: ['inProgress', 'submitted', 'grading', 'completed'],
-      default: 'inProgress',
-      index: true
-    },
-    timeSpent: Number, // in seconds
+const quizAttemptSchema = new mongoose.Schema({
+  quiz: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Quiz',
+    required: true,
+    index: true
   },
-  { 
-    timestamps: true,
-    toJSON: { virtuals: true },
-    toObject: { virtuals: true }
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    index: true
+  },
+  startTime: {
+    type: Date,
+    required: true,
+    default: Date.now
+  },
+  submitTime: Date,
+  answers: [{
+    questionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      required: true
+    },
+    // For MCQ
+    selectedOption: String,
+    // For text questions
+    textAnswer: String,
+    marks: Number,
+    isCorrect: Boolean,
+    feedback: String
+  }],
+  score: Number,
+  percentage: Number,
+  status: {
+    type: String,
+    enum: ['inProgress', 'submitted', 'graded'],
+    default: 'inProgress'
+  },
+  attempt: {
+    type: Number,
+    required: true
+  },
+  gradedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
   }
-)
+}, {
+  timestamps: true
+});
 
 // Index for checking attempt limits
-quizAttemptSchema.index({ quiz: 1, user: 1, attempt: 1 }, { unique: true })
+quizAttemptSchema.index({ quiz: 1, user: 1, attempt: 1 }, { unique: true });
 
 // Virtual for remaining time
 quizAttemptSchema.virtual('remainingTime').get(function() {
-  if (this.status !== 'inProgress' || !this.startedAt) return 0
+  if (this.status !== 'inProgress' || !this.startTime) return 0;
   
-  const quiz = this.quiz
-  if (!quiz || !quiz.duration) return 0
+  const quiz = this.quiz;
+  if (!quiz?.quizTime) return 0;
   
-  const endTime = new Date(this.startedAt.getTime() + quiz.duration * 60000)
-  const remaining = endTime - new Date()
+  const endTime = new Date(this.startTime.getTime() + quiz.quizTime * 60000);
+  const remaining = endTime - new Date();
   
-  return Math.max(0, Math.floor(remaining / 1000))
-})
+  return Math.max(0, Math.floor(remaining / 1000)); // Return remaining seconds
+});
 
 const paymentSchema = new mongoose.Schema(
   {
@@ -1112,3 +1032,238 @@ module.exports = {
   VideoProgress : mongoose.model('VideoProgress', videoProgressSchema),
   AssetProgress : mongoose.model('AssetProgress', assetProgressSchema)
 }
+
+
+/*
+
+// Quiz Schema
+const quizSchema = new mongoose.Schema(
+  {
+    lesson: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Lesson',
+      required: true,
+      index: true,
+    },
+    title: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    description: String,
+    instructions: String,
+    duration: {
+      type: Number, // in minutes
+      required: true,
+      min: 1
+    },
+    passingScore: {
+      type: Number,
+      required: true,
+      min: 0,
+      max: 100,
+    },
+    maxAttempts: {
+      type: Number,
+      required: true,
+      default: 3,
+      min: 1
+    },
+    shuffleQuestions: {
+      type: Boolean,
+      default: false
+    },
+    shuffleOptions: {
+      type: Boolean,
+      default: false
+    },
+    showResults: {
+      type: Boolean, // Whether to show correct answers after submission
+      default: true
+    },
+    questions: [{
+      questionText: {
+        type: String,
+        required: true
+      },
+      type: {
+        type: String,
+        enum: ['mcq', 'fillInGaps', 'essay'],
+        required: true
+      },
+      marks: {
+        type: Number,
+        required: true,
+        default: 1
+      },
+      // For MCQ
+      options: [{
+        text: String,
+        isCorrect: Boolean
+      }],
+      // For fill in gaps
+      gapAnswers: [{
+        position: Number,
+        correctAnswer: String,
+        caseSensitive: {
+          type: Boolean,
+          default: false
+        },
+        alternativeAnswers: [String] // Accept multiple possible answers
+      }],
+      // For essay questions
+      rubric: {
+        criteria: [{
+          name: String,
+          description: String,
+          maxScore: Number
+        }],
+        totalMarks: Number
+      },
+      explanation: String // Explanation shown after attempt (if showResults is true)
+    }],
+    totalMarks: {
+      type: Number,
+      required: true
+    },
+    requireManualGrading: {
+      type: Boolean,
+      default: false
+    },
+    gradingInProgress: {
+      type: Boolean,
+      default: false
+    },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+  },
+  { 
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true }
+  }
+)
+
+// Quiz schema middleware to calculate total marks
+quizSchema.pre('save', function(next) {
+  if (this.isModified('questions')) {
+    this.totalMarks = this.questions.reduce((sum, question) => sum + question.marks, 0)
+    this.requireManualGrading = this.questions.some(q => q.type === 'essay')
+  }
+  next()
+})
+
+// Quiz Attempt Schema
+const quizAttemptSchema = new mongoose.Schema(
+  {
+    quiz: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Quiz',
+      required: true,
+      index: true,
+    },
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true,
+    },
+    startedAt: {
+      type: Date,
+      required: true,
+    },
+    submittedAt: {
+      type: Date,
+      index: true,
+    },
+    answers: [{
+      question: {
+        type: mongoose.Schema.Types.ObjectId,
+        required: true,
+      },
+      type: {
+        type: String,
+        enum: ['mcq', 'fillInGaps', 'essay'],
+        required: true,
+      },
+      // For MCQ
+      selectedOptions: [{
+        type: String
+      }],
+      // For fill in gaps
+      gapAnswers: [{
+        position: Number,
+        answer: String
+      }],
+      // For essay
+      essayAnswer: {
+        text: String,
+        attachments: [{
+          url: String,
+          key: String,
+          name: String,
+          type: String
+        }]
+      },
+      // Grading
+      marks: Number,
+      feedback: String,
+      rubricScores: [{
+        criteriaName: String,
+        score: Number,
+        feedback: String
+      }],
+      isCorrect: Boolean,
+      autoGraded: Boolean
+    }],
+    score: Number,
+    percentage: Number,
+    passed: Boolean,
+    attempt: {
+      type: Number,
+      required: true,
+    },
+    gradedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    gradingComplete: {
+      type: Boolean,
+      default: false,
+      index: true
+    },
+    status: {
+      type: String,
+      enum: ['inProgress', 'submitted', 'grading', 'completed'],
+      default: 'inProgress',
+      index: true
+    },
+    timeSpent: Number, // in seconds
+  },
+  { 
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true }
+  }
+)
+
+// Index for checking attempt limits
+quizAttemptSchema.index({ quiz: 1, user: 1, attempt: 1 }, { unique: true })
+
+// Virtual for remaining time
+quizAttemptSchema.virtual('remainingTime').get(function() {
+  if (this.status !== 'inProgress' || !this.startedAt) return 0
+  
+  const quiz = this.quiz
+  if (!quiz || !quiz.duration) return 0
+  
+  const endTime = new Date(this.startedAt.getTime() + quiz.duration * 60000)
+  const remaining = endTime - new Date()
+  
+  return Math.max(0, Math.floor(remaining / 1000))
+})
+
+*/
