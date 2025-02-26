@@ -79,51 +79,68 @@ const updateLessonSchema = Joi.object({
 
 
 // Helper Functions
+// async function checkQuizRequirements(userId, lessonId) {
+//   try {
+//     const lesson = await Lesson.findById(lessonId).populate('quiz')
+//     if (!lesson || !lesson.quiz) return true
+
+//     // Get user's time spent on lesson
+//     const timeSpentRecord = await LessonProgress.findOne({
+//       user: userId,
+//       lesson: lessonId,
+//     })
+
+//     const timeSpent = timeSpentRecord?.timeSpent || 0
+//     if (lesson.quizSettings?.minimumTimeRequired > 0 && timeSpent < lesson.quizSettings.minimumTimeRequired * 60) {
+//       // Convert minutes to seconds
+//       return false
+//     }
+
+//     // Check content viewing requirement for 'after' setting
+//     if (lesson.quizSettings?.showQuizAt === 'after') {
+//       // Check video progress if video exists
+//       if (lesson.videoUrl) {
+//         const videoProgress = await VideoProgress.findOne({
+//           user: userId,
+//           lesson: lessonId,
+//         })
+
+//         if (!videoProgress?.completed) {
+//           return false
+//         }
+//       }
+
+//       // Check required asset downloads
+//       const requiredAssets = lesson.completionRequirements?.downloadAssets?.filter((asset) => asset.required) || []
+
+//       if (requiredAssets.length > 0) {
+//         const assetDownloads = await AssetProgress.find({
+//           user: userId,
+//           lesson: lessonId,
+//           asset: { $in: requiredAssets.map((a) => a.assetId) },
+//         })
+
+//         if (assetDownloads.length < requiredAssets.length) {
+//           return false
+//         }
+//       }
+//     }
+
+//     return true
+//   } catch (error) {
+//     console.error('Error checking quiz requirements:', error)
+//     return false
+//   }
+// }
+
 async function checkQuizRequirements(userId, lessonId) {
   try {
     const lesson = await Lesson.findById(lessonId).populate('quiz')
-    if (!lesson || !lesson.quiz) return true
+    if (!lesson || !lesson.quiz) return true // No quiz means requirements are met
 
-    // Get user's time spent on lesson
-    const timeSpentRecord = await LessonProgress.findOne({
-      user: userId,
-      lesson: lessonId,
-    })
-
-    const timeSpent = timeSpentRecord?.timeSpent || 0
-    if (lesson.quizSettings?.minimumTimeRequired > 0 && timeSpent < lesson.quizSettings.minimumTimeRequired * 60) {
-      // Convert minutes to seconds
-      return false
-    }
-
-    // Check content viewing requirement for 'after' setting
-    if (lesson.quizSettings?.showQuizAt === 'after') {
-      // Check video progress if video exists
-      if (lesson.videoUrl) {
-        const videoProgress = await VideoProgress.findOne({
-          user: userId,
-          lesson: lessonId,
-        })
-
-        if (!videoProgress?.completed) {
-          return false
-        }
-      }
-
-      // Check required asset downloads
-      const requiredAssets = lesson.completionRequirements?.downloadAssets?.filter((asset) => asset.required) || []
-
-      if (requiredAssets.length > 0) {
-        const assetDownloads = await AssetProgress.find({
-          user: userId,
-          lesson: lessonId,
-          asset: { $in: requiredAssets.map((a) => a.assetId) },
-        })
-
-        if (assetDownloads.length < requiredAssets.length) {
-          return false
-        }
-      }
+    // Only check if the quiz exists and is required
+    if (lesson.quizSettings?.required) {
+      return await validateQuizCompletion(userId, lessonId)
     }
 
     return true
@@ -222,6 +239,121 @@ async function trackAssetDownload(userId, lessonId, assetId) {
   }
 }
 
+// async function updateProgress(userId, courseId, moduleId, lessonId, quizId = null) {
+//   const session = await mongoose.startSession()
+//   session.startTransaction()
+
+//   try {
+//     let progress = await Progress.findOne({
+//       user: userId,
+//       course: courseId,
+//       module: moduleId,
+//     }).session(session)
+
+//     const lesson = await Lesson.findById(lessonId).populate('quiz').session(session)
+
+//     if (!lesson) {
+//       throw new Error('Lesson not found')
+//     }
+
+//     const requirements = lesson.completionRequirements
+//     let canComplete = true
+
+//     // Check video requirement
+//     if (requirements.watchVideo && lesson.videoUrl) {
+//       const videoProgress = await VideoProgress.findOne({
+//         user: userId,
+//         lesson: lessonId,
+//       }).session(session)
+
+//       if (!videoProgress?.completed) {
+//         canComplete = false
+//       }
+//     }
+
+//     // Check required assets
+//     if (requirements.downloadAssets?.length > 0) {
+//       const requiredAssets = requirements.downloadAssets.filter((asset) => asset.required)
+//       if (requiredAssets.length > 0) {
+//         const downloads = await AssetProgress.countDocuments({
+//           user: userId,
+//           lesson: lessonId,
+//           asset: { $in: requiredAssets.map((a) => a.assetId) },
+//         }).session(session)
+
+//         if (downloads < requiredAssets.length) {
+//           canComplete = false
+//         }
+//       }
+//     }
+
+//     // Check minimum time requirement
+//     if (requirements.minimumTimeSpent > 0) {
+//       const timeProgress = await LessonProgress.findOne({
+//         user: userId,
+//         lesson: lessonId,
+//       }).session(session)
+
+//       if (!timeProgress || timeProgress.timeSpent < requirements.minimumTimeSpent * 60) {
+//         canComplete = false
+//       }
+//     }
+
+//     // Check quiz requirements if quiz exists
+//     if (lesson.quiz) {
+//       const quizCompleted = await validateQuizCompletion(userId, lessonId)
+//       if (!quizCompleted) {
+//         canComplete = false
+//       }
+//     }
+
+//     if (!progress) {
+//       progress = await Progress.create(
+//         [
+//           {
+//             user: userId,
+//             course: courseId,
+//             module: moduleId,
+//             completedLessons: canComplete ? [lessonId] : [],
+//             completedQuizzes: quizId && canComplete ? [quizId] : [],
+//             lastAccessed: new Date(),
+//           },
+//         ],
+//         { session }
+//       )
+//     } else {
+//       if (canComplete && !progress.completedLessons.includes(lessonId)) {
+//         progress.completedLessons.push(lessonId)
+//       }
+//       if (quizId && canComplete && !progress.completedQuizzes.includes(quizId)) {
+//         progress.completedQuizzes.push(quizId)
+//       }
+//       progress.lastAccessed = new Date()
+
+//       const totalLessons = await Lesson.countDocuments({
+//         module: moduleId,
+//         isDeleted: false,
+//       }).session(session)
+
+//       progress.progress = (progress.completedLessons.length / totalLessons) * 100
+//       await progress.save({ session })
+//     }
+
+//     await session.commitTransaction()
+//     return {
+//       canComplete,
+//       progress: progress.progress,
+//       completedLessons: progress.completedLessons,
+//       completedQuizzes: progress.completedQuizzes,
+//     }
+//   } catch (error) {
+//     await session.abortTransaction()
+//     throw error
+//   } finally {
+//     session.endSession()
+//   }
+// }
+
 async function updateProgress(userId, courseId, moduleId, lessonId, quizId = null) {
   const session = await mongoose.startSession()
   session.startTransaction()
@@ -239,51 +371,10 @@ async function updateProgress(userId, courseId, moduleId, lessonId, quizId = nul
       throw new Error('Lesson not found')
     }
 
-    const requirements = lesson.completionRequirements
     let canComplete = true
 
-    // Check video requirement
-    if (requirements.watchVideo && lesson.videoUrl) {
-      const videoProgress = await VideoProgress.findOne({
-        user: userId,
-        lesson: lessonId,
-      }).session(session)
-
-      if (!videoProgress?.completed) {
-        canComplete = false
-      }
-    }
-
-    // Check required assets
-    if (requirements.downloadAssets?.length > 0) {
-      const requiredAssets = requirements.downloadAssets.filter((asset) => asset.required)
-      if (requiredAssets.length > 0) {
-        const downloads = await AssetProgress.countDocuments({
-          user: userId,
-          lesson: lessonId,
-          asset: { $in: requiredAssets.map((a) => a.assetId) },
-        }).session(session)
-
-        if (downloads < requiredAssets.length) {
-          canComplete = false
-        }
-      }
-    }
-
-    // Check minimum time requirement
-    if (requirements.minimumTimeSpent > 0) {
-      const timeProgress = await LessonProgress.findOne({
-        user: userId,
-        lesson: lessonId,
-      }).session(session)
-
-      if (!timeProgress || timeProgress.timeSpent < requirements.minimumTimeSpent * 60) {
-        canComplete = false
-      }
-    }
-
-    // Check quiz requirements if quiz exists
-    if (lesson.quiz) {
+    // Check quiz requirements if quiz exists and is required
+    if (lesson.quiz && lesson.quizSettings?.required) {
       const quizCompleted = await validateQuizCompletion(userId, lessonId)
       if (!quizCompleted) {
         canComplete = false
@@ -346,22 +437,6 @@ async function validateAssetIds(assetIds, lessonId) {
   return assetIds.every((assetId) => lesson.assets.some((asset) => asset._id.toString() === assetId))
 }
 
-// async function checkModuleAccess(userId, courseId, moduleId) {
-//   const user = await User.findOne({
-//     _id: userId,
-//     'enrolledCourses.course': courseId,
-//   })
-
-//   if (!user) return false
-
-//   const enrollment = user.enrolledCourses.find((ec) => ec.course.toString() === courseId)
-//   if (!enrollment) return false
-
-//   if (enrollment.enrollmentType === 'full') return true
-
-//   return enrollment.enrolledModules.some((em) => em.module.toString() === moduleId)
-// }
-
 async function checkModuleAccess(userId, courseId, moduleId) {
   const user = await User.findOne({ _id: userId }).select('+role')
 
@@ -379,90 +454,6 @@ async function checkModuleAccess(userId, courseId, moduleId) {
   if (enrollment.enrollmentType === 'full') return true
 
   return enrollment.enrolledModules.some((em) => em.module.toString() === moduleId)
-}
-
-async function updateProgress(userId, courseId, moduleId, lessonId, quizId = null) {
-  const session = await mongoose.startSession()
-  session.startTransaction()
-
-  try {
-    let progress = await Progress.findOne({
-      user: userId,
-      course: courseId,
-      module: moduleId,
-    }).session(session)
-
-    // Get lesson for completion requirements
-    const lesson = await Lesson.findById(lessonId)
-    if (!lesson) {
-      throw new Error('Lesson not found')
-    }
-
-    const requirements = lesson.completionRequirements
-    let canComplete = true
-
-    // Check video requirement
-    if (requirements.watchVideo && !lesson.videoUrl) {
-      canComplete = false
-    }
-
-    // Check required assets
-    if (requirements.downloadAssets?.length) {
-      const requiredAssets = requirements.downloadAssets.filter((asset) => asset.required)
-      if (requiredAssets.length) {
-        // You would need to track asset downloads separately
-        // This is just a placeholder for the logic
-        canComplete = false // Set based on asset download tracking
-      }
-    }
-
-    // Check minimum time
-    if (requirements.minimumTimeSpent > 0) {
-      // You would need to track time spent separately
-      // This is just a placeholder for the logic
-      canComplete = false // Set based on time tracking
-    }
-
-    if (!progress) {
-      progress = await Progress.create(
-        [
-          {
-            user: userId,
-            course: courseId,
-            module: moduleId,
-            completedLessons: canComplete ? [lessonId] : [],
-            completedQuizzes: quizId && canComplete ? [quizId] : [],
-            lastAccessed: new Date(),
-          },
-        ],
-        { session }
-      )
-    } else {
-      if (canComplete && !progress.completedLessons.includes(lessonId)) {
-        progress.completedLessons.push(lessonId)
-      }
-      if (quizId && canComplete && !progress.completedQuizzes.includes(quizId)) {
-        progress.completedQuizzes.push(quizId)
-      }
-      progress.lastAccessed = new Date()
-
-      const totalLessons = await Lesson.countDocuments({
-        module: moduleId,
-        isDeleted: false,
-      }).session(session)
-
-      progress.progress = (progress.completedLessons.length / totalLessons) * 100
-      await progress.save({ session })
-    }
-
-    await session.commitTransaction()
-    return canComplete
-  } catch (error) {
-    await session.abortTransaction()
-    throw error
-  } finally {
-    session.endSession()
-  }
 }
 
 // Create Lesson
@@ -1252,42 +1243,11 @@ exports.deleteLesson = async (req, res, next) => {
 }
 
 // Track Lesson Progress
+
 exports.trackProgress = async (req, res, next) => {
   try {
     const { lessonId } = req.params
-    const { timeSpent, action, position, completed } = req.body
     const userId = req.user._id
-
-    const updates = []
-
-    // Handle time tracking
-    if (timeSpent > 0) {
-      updates.push(trackLessonTime(userId, lessonId, timeSpent))
-    }
-
-    // Handle video progress
-    if (action === 'video' && typeof position === 'number') {
-      let videoProgress = await VideoProgress.findOne({
-        user: userId,
-        lesson: lessonId,
-      })
-
-      if (!videoProgress) {
-        videoProgress = new VideoProgress({
-          user: userId,
-          lesson: lessonId,
-          watchedTime: 0,
-          lastPosition: 0,
-        })
-      }
-
-      videoProgress.lastPosition = position
-      videoProgress.watchedTime += timeSpent || 0
-      videoProgress.completed = completed || videoProgress.completed
-      updates.push(videoProgress.save())
-    }
-
-    await Promise.all(updates)
 
     // Update overall lesson progress
     const progressUpdate = await updateProgress(userId, req.params.courseId, req.params.moduleId, lessonId)
@@ -1631,19 +1591,20 @@ exports.markLessonComplete = async (req, res, next) => {
 
     // Check prerequisites
     const module = await Module.findById(moduleId)
-    const prerequisitesMet = await module.prerequisites?.every(async prereqId => {
-      const progress = await Progress.findOne({
-        user: userId,
-        module: prereqId
-      })
-      return progress?.progress === 100
-    }) ?? true
+    const prerequisitesMet =
+      (await module.prerequisites?.every(async (prereqId) => {
+        const progress = await Progress.findOne({
+          user: userId,
+          module: prereqId,
+        })
+        return progress?.progress === 100
+      })) ?? true
 
     if (!prerequisitesMet) {
       return next(new AppError('Module prerequisites not met', 403))
     }
 
-    // Check completion requirements
+    // Check quiz requirements if quiz exists and is required
     if (lesson.quiz && lesson.quizSettings?.required) {
       const quizCompleted = await validateQuizCompletion(userId, lessonId)
       if (!quizCompleted) {
@@ -1654,18 +1615,14 @@ exports.markLessonComplete = async (req, res, next) => {
     // Update progress
     const progressUpdate = await updateProgress(userId, courseId, moduleId, lessonId, lesson.quiz?._id)
 
-    if (!progressUpdate.canComplete) {
-      return next(new AppError('Lesson completion requirements not met', 403))
-    }
-
     res.status(200).json({
       status: 'success',
       message: 'Lesson marked as complete',
       data: {
         progress: progressUpdate.progress,
         completedLessons: progressUpdate.completedLessons,
-        completedQuizzes: progressUpdate.completedQuizzes
-      }
+        completedQuizzes: progressUpdate.completedQuizzes,
+      },
     })
   } catch (error) {
     next(error)
