@@ -3,13 +3,91 @@ const { Quiz, QuizAttempt, Lesson, Progress, User, LessonProgress, VideoProgress
 const { AppError } = require('../utils/errors')
 
 // Create a new quiz
+// exports.createQuiz = async (req, res, next) => {
+//   const session = await mongoose.startSession()
+//   session.startTransaction()
+
+//   try {
+//     const { courseId, moduleId, lessonId } = req.params
+//     const { title, quizTime, passingScore, questions, maxAttempts = 3 } = req.body
+
+//     // Validate lesson exists
+//     const lesson = await Lesson.findOne({
+//       _id: lessonId,
+//       module: moduleId,
+//       isDeleted: false,
+//     }).session(session)
+
+//     if (!lesson) {
+//       await session.abortTransaction()
+//       return next(new AppError('Lesson not found', 404))
+//     }
+
+//     // Check if quiz already exists
+//     if (lesson.quiz) {
+//       await session.abortTransaction()
+//       return next(new AppError('Quiz already exists for this lesson', 400))
+//     }
+
+//     // Calculate totalMarks from questions
+//     const totalMarks = questions.reduce((sum, q) => sum + (q.marks || 1), 0)
+
+//     // Create quiz
+//     const quiz = await Quiz.create(
+//       [
+//         {
+//           lesson: lessonId,
+//           title,
+//           quizTime,
+//           passingScore,
+//           maxAttempts,
+//           totalMarks,
+//           questions: questions.map((q) => ({
+//             question: q.question,
+//             type: q.options ? 'mcq' : 'text',
+//             options: q.options,
+//             marks: q.marks || 1,
+//           })),
+//         },
+//       ],
+//       { session }
+//     )
+
+//     // Update lesson with quiz reference and quiz settings
+//     lesson.quiz = quiz[0]._id
+//     lesson.quizSettings = {
+//       required: true, // Since a quiz is being created
+//       minimumPassingScore: passingScore,
+//       allowReview: true,
+//       blockProgress: true,
+//       showQuizAt: 'after',
+//       minimumTimeRequired: 0,
+//     }
+
+//     await lesson.save({ session })
+
+//     await session.commitTransaction()
+
+//     res.status(201).json({
+//       status: 'success',
+//       message: 'Quiz created successfully',
+//       data: quiz[0],
+//     })
+//   } catch (error) {
+//     await session.abortTransaction()
+//     next(error)
+//   } finally {
+//     session.endSession()
+//   }
+// }
+
 exports.createQuiz = async (req, res, next) => {
   const session = await mongoose.startSession()
   session.startTransaction()
 
   try {
     const { courseId, moduleId, lessonId } = req.params
-    const { title, quizTime, passingScore, questions, maxAttempts = 3 } = req.body
+    const { title, quizTime, passingScore, questions, maxAttempts = 3, questionPoolSize = 0 } = req.body
 
     // Validate lesson exists
     const lesson = await Lesson.findOne({
@@ -29,6 +107,12 @@ exports.createQuiz = async (req, res, next) => {
       return next(new AppError('Quiz already exists for this lesson', 400))
     }
 
+    // Validate questionPoolSize
+    if (questionPoolSize > questions.length) {
+      await session.abortTransaction()
+      return next(new AppError('Question pool size cannot exceed total number of questions', 400))
+    }
+
     // Calculate totalMarks from questions
     const totalMarks = questions.reduce((sum, q) => sum + (q.marks || 1), 0)
 
@@ -41,6 +125,7 @@ exports.createQuiz = async (req, res, next) => {
           quizTime,
           passingScore,
           maxAttempts,
+          questionPoolSize,
           totalMarks,
           questions: questions.map((q) => ({
             question: q.question,
@@ -82,13 +167,92 @@ exports.createQuiz = async (req, res, next) => {
 }
 
 // Update a quiz
+// exports.updateQuiz = async (req, res, next) => {
+//   const session = await mongoose.startSession()
+//   session.startTransaction()
+
+//   try {
+//     const { courseId, moduleId, lessonId } = req.params
+//     const { title, quizTime, passingScore, questions, maxAttempts } = req.body
+
+//     // Validate lesson exists and has a quiz
+//     const lesson = await Lesson.findOne({
+//       _id: lessonId,
+//       module: moduleId,
+//       isDeleted: false,
+//     })
+//       .populate('quiz')
+//       .session(session)
+
+//     if (!lesson) {
+//       await session.abortTransaction()
+//       return next(new AppError('Lesson not found', 404))
+//     }
+
+//     if (!lesson.quiz) {
+//       await session.abortTransaction()
+//       return next(new AppError('Quiz not found for this lesson', 404))
+//     }
+
+//     const quiz = lesson.quiz
+
+//     // Check if there are existing attempts - if so, restrict certain changes
+//     const hasAttempts = await QuizAttempt.exists({ quiz: quiz._id }).session(session)
+
+//     // Allow updating basic info regardless of attempts
+//     const updateData = {}
+//     if (title) updateData.title = title
+//     if (quizTime) updateData.quizTime = quizTime
+//     if (passingScore) updateData.passingScore = passingScore
+//     if (maxAttempts) updateData.maxAttempts = maxAttempts
+
+//     // Only update questions if there are no attempts
+//     if (questions && !hasAttempts) {
+//       updateData.questions = questions.map((q) => ({
+//         question: q.question,
+//         type: q.options ? 'mcq' : 'text',
+//         options: q.options,
+//         marks: q.marks || 1,
+//       }))
+
+//       // Recalculate totalMarks
+//       updateData.totalMarks = questions.reduce((sum, q) => sum + (q.marks || 1), 0)
+//     } else if (questions && hasAttempts) {
+//       await session.abortTransaction()
+//       return next(new AppError('Cannot modify quiz questions when there are existing attempts', 400))
+//     }
+
+//     // Update the quiz
+//     const updatedQuiz = await Quiz.findByIdAndUpdate(quiz._id, updateData, { new: true, runValidators: true, session })
+
+//     // Update lesson quiz settings if necessary
+//     if (passingScore) {
+//       lesson.quizSettings.minimumPassingScore = passingScore
+//       await lesson.save({ session })
+//     }
+
+//     await session.commitTransaction()
+
+//     res.status(200).json({
+//       status: 'success',
+//       message: 'Quiz updated successfully',
+//       data: updatedQuiz,
+//     })
+//   } catch (error) {
+//     await session.abortTransaction()
+//     next(error)
+//   } finally {
+//     session.endSession()
+//   }
+// }
+
 exports.updateQuiz = async (req, res, next) => {
   const session = await mongoose.startSession()
   session.startTransaction()
 
   try {
     const { courseId, moduleId, lessonId } = req.params
-    const { title, quizTime, passingScore, questions, maxAttempts } = req.body
+    const { title, quizTime, passingScore, questions, maxAttempts, questionPoolSize } = req.body
 
     // Validate lesson exists and has a quiz
     const lesson = await Lesson.findOne({
@@ -120,6 +284,24 @@ exports.updateQuiz = async (req, res, next) => {
     if (quizTime) updateData.quizTime = quizTime
     if (passingScore) updateData.passingScore = passingScore
     if (maxAttempts) updateData.maxAttempts = maxAttempts
+    if (questionPoolSize !== undefined) {
+      // If updating both questions and pool size
+      if (questions && !hasAttempts) {
+        if (questionPoolSize > questions.length) {
+          await session.abortTransaction()
+          return next(new AppError('Question pool size cannot exceed total number of questions', 400))
+        }
+        updateData.questionPoolSize = questionPoolSize
+      }
+      // If only updating pool size (check against existing questions)
+      else if (!questions) {
+        if (questionPoolSize > quiz.questions.length) {
+          await session.abortTransaction()
+          return next(new AppError('Question pool size cannot exceed total number of questions', 400))
+        }
+        updateData.questionPoolSize = questionPoolSize
+      }
+    }
 
     // Only update questions if there are no attempts
     if (questions && !hasAttempts) {
@@ -174,9 +356,7 @@ exports.deleteQuiz = async (req, res, next) => {
       _id: lessonId,
       module: moduleId,
       isDeleted: false,
-    })
-      .populate('quiz')
-      .session(session)
+    }).session(session)
 
     if (!lesson) {
       await session.abortTransaction()
@@ -188,7 +368,7 @@ exports.deleteQuiz = async (req, res, next) => {
       return next(new AppError('Quiz not found for this lesson', 404))
     }
 
-    const quizId = lesson.quiz._id
+    const quizId = lesson.quiz
 
     // Check if there are existing attempts
     const hasAttempts = await QuizAttempt.exists({ quiz: quizId }).session(session)
@@ -196,26 +376,22 @@ exports.deleteQuiz = async (req, res, next) => {
     if (hasAttempts) {
       // Soft delete - mark quiz as deleted but keep the data
       await Quiz.findByIdAndUpdate(quizId, { isDeleted: true }, { session })
-
-      // Keep the lesson.quiz reference but update quiz settings
-      lesson.quizSettings.required = false
-      await lesson.save({ session })
     } else {
       // Hard delete - remove the quiz completely
       await Quiz.findByIdAndDelete(quizId, { session })
-
-      // Remove quiz reference from lesson
-      lesson.quiz = undefined
-      lesson.quizSettings = {
-        required: false,
-        minimumPassingScore: 70,
-        allowReview: true,
-        blockProgress: false,
-        showQuizAt: 'after',
-        minimumTimeRequired: 0,
-      }
-      await lesson.save({ session })
     }
+
+    // Always remove the quiz reference from the lesson
+    lesson.quiz = undefined
+    lesson.quizSettings = {
+      required: false,
+      minimumPassingScore: 70,
+      allowReview: true,
+      blockProgress: false,
+      showQuizAt: 'after',
+      minimumTimeRequired: 0,
+    }
+    await lesson.save({ session })
 
     await session.commitTransaction()
 
@@ -506,6 +682,145 @@ exports.getQuiz = async (req, res, next) => {
 }
 
 // Start a new quiz attempt
+// exports.startQuiz = async (req, res, next) => {
+//   const session = await mongoose.startSession()
+//   session.startTransaction()
+
+//   try {
+//     const { courseId, moduleId, lessonId } = req.params
+//     const userId = req.user._id
+
+//     // Check user has access to this module/course - simplified check
+//     const user = await User.findById(userId).select('+role +enrolledCourses').lean().session(session)
+
+//     if (!user) {
+//       await session.abortTransaction()
+//       return next(new AppError('User not found', 404))
+//     }
+
+//     const isAdmin = ['admin', 'subAdmin', 'moderator'].includes(user.role)
+//     let hasAccess = isAdmin
+
+//     if (!isAdmin) {
+//       const enrolledCourse = user.enrolledCourses?.find((ec) => ec.course.toString() === courseId)
+//       hasAccess = enrolledCourse && (enrolledCourse.enrollmentType === 'full' || enrolledCourse.enrolledModules.some((em) => em.module.toString() === moduleId))
+//     }
+
+//     if (!hasAccess) {
+//       await session.abortTransaction()
+//       return next(new AppError('You do not have access to this module', 403))
+//     }
+
+//     const lesson = await Lesson.findOne({
+//       _id: lessonId,
+//       module: moduleId,
+//       isDeleted: false,
+//     })
+//       .populate({
+//         path: 'quiz',
+//         match: { isDeleted: false },
+//       })
+//       .session(session)
+
+//     if (!lesson || !lesson.quiz) {
+//       await session.abortTransaction()
+//       return next(new AppError('Quiz not found', 404))
+//     }
+
+//     const quiz = lesson.quiz
+
+//     // Check requirements
+//     let canTakeQuiz = true
+
+//     // Time requirement check
+//     if (lesson.quizSettings?.minimumTimeRequired > 0) {
+//       const timeProgress = await LessonProgress.findOne({
+//         user: userId,
+//         lesson: lessonId,
+//       }).session(session)
+
+//       if (!timeProgress || timeProgress.timeSpent < lesson.quizSettings.minimumTimeRequired * 60) {
+//         canTakeQuiz = false
+//       }
+//     }
+
+//     if (!canTakeQuiz) {
+//       await session.abortTransaction()
+//       return next(new AppError('Quiz requirements not met', 403))
+//     }
+
+//     // Check attempts limit
+//     const attemptCount = await QuizAttempt.countDocuments({
+//       quiz: quiz._id,
+//       user: userId,
+//     }).session(session)
+
+//     if (attemptCount >= quiz.maxAttempts) {
+//       await session.abortTransaction()
+//       return next(new AppError('Maximum attempts reached', 400))
+//     }
+
+//     // Check for ongoing attempt
+//     const ongoingAttempt = await QuizAttempt.findOne({
+//       quiz: quiz._id,
+//       user: userId,
+//       status: 'inProgress',
+//     }).session(session)
+
+//     if (ongoingAttempt) {
+//       await session.abortTransaction()
+//       return next(new AppError('You have an ongoing quiz attempt', 400))
+//     }
+
+//     // Create new attempt
+//     const attempt = await QuizAttempt.create(
+//       [
+//         {
+//           quiz: quiz._id,
+//           user: userId,
+//           attempt: attemptCount + 1,
+//           attempt: 1,
+//           startTime: new Date(),
+//         },
+//       ],
+//       { session }
+//     )
+
+//     // Prepare questions (remove correct answers for MCQs)
+//     const questions = quiz.questions.map((q) => ({
+//       _id: q._id,
+//       question: q.question,
+//       type: q.type,
+//       marks: q.marks,
+//       options:
+//         q.type === 'mcq'
+//           ? q.options.map((opt) => ({
+//               _id: opt._id,
+//               option: opt.option,
+//             }))
+//           : undefined,
+//     }))
+
+//     await session.commitTransaction()
+
+//     res.status(200).json({
+//       status: 'success',
+//       message: 'Quiz attempt started',
+//       data: {
+//         attemptId: attempt[0]._id,
+//         questions,
+//         quizTime: quiz.quizTime,
+//         startTime: attempt[0].startTime,
+//       },
+//     })
+//   } catch (error) {
+//     await session.abortTransaction()
+//     next(error)
+//   } finally {
+//     session.endSession()
+//   }
+// }
+
 exports.startQuiz = async (req, res, next) => {
   const session = await mongoose.startSession()
   session.startTransaction()
@@ -553,10 +868,10 @@ exports.startQuiz = async (req, res, next) => {
 
     const quiz = lesson.quiz
 
-    // Check requirements
-    let canTakeQuiz = true
+    // // Check requirements
+    // let canTakeQuiz = true
 
-    // // Time requirement check
+    // // Lesson video view or engagement Time requirement check
     // if (lesson.quizSettings?.minimumTimeRequired > 0) {
     //   const timeProgress = await LessonProgress.findOne({
     //     user: userId,
@@ -568,62 +883,85 @@ exports.startQuiz = async (req, res, next) => {
     //   }
     // }
 
-    // // Video completion check if required
-    // if (canTakeQuiz && lesson.quizSettings?.showQuizAt === 'after' && lesson.videoUrl) {
-    //   const videoProgress = await VideoProgress.findOne({
-    //     user: userId,
-    //     lesson: lessonId,
-    //   }).session(session)
-
-    //   if (!videoProgress?.completed) {
-    //     canTakeQuiz = false
-    //   }
-    // }
-
     // if (!canTakeQuiz) {
     //   await session.abortTransaction()
     //   return next(new AppError('Quiz requirements not met', 403))
     // }
 
-    // // Check attempts limit
-    // const attemptCount = await QuizAttempt.countDocuments({
-    //   quiz: quiz._id,
-    //   user: userId,
-    // }).session(session)
+    // Check attempts limit
+    const attemptCount = await QuizAttempt.countDocuments({
+      quiz: quiz._id,
+      user: userId,
+      status: { $ne: 'inProgress' }, // Only count completed/graded attempts
+    }).session(session)
 
-    // if (attemptCount >= quiz.maxAttempts) {
-    //   await session.abortTransaction()
-    //   return next(new AppError('Maximum attempts reached', 400))
-    // }
+    if (attemptCount >= quiz.maxAttempts) {
+      await session.abortTransaction()
+      return next(new AppError('Maximum attempts reached', 400))
+    }
 
-    // // Check for ongoing attempt
-    // const ongoingAttempt = await QuizAttempt.findOne({
-    //   quiz: quiz._id,
-    //   user: userId,
-    //   status: 'inProgress',
-    // }).session(session)
+    // Check for ongoing attempt and handle expired attempts
+    const ongoingAttempt = await QuizAttempt.findOne({
+      quiz: quiz._id,
+      user: userId,
+      status: 'inProgress',
+    }).session(session)
 
-    // if (ongoingAttempt) {
-    //   await session.abortTransaction()
-    //   return next(new AppError('You have an ongoing quiz attempt', 400))
-    // }
+    if (ongoingAttempt) {
+      // Calculate if the attempt has expired based on quiz time
+      const timeLimit = quiz.quizTime * 60 * 1000 // Convert to milliseconds
+      const timeSinceStart = new Date() - ongoingAttempt.startTime
 
-    // Create new attempt
+      if (timeSinceStart > timeLimit) {
+        // The attempt has expired, so mark it as such
+        ongoingAttempt.status = 'submitted'
+        ongoingAttempt.submitTime = new Date(ongoingAttempt.startTime.getTime() + timeLimit)
+        ongoingAttempt.score = 0 // No score for expired/unsubmitted
+        ongoingAttempt.percentage = 0
+        ongoingAttempt.passed = false
+
+        // Save any answers that might have been recorded
+        await ongoingAttempt.save({ session })
+      } else {
+        // The attempt is still valid within the time window
+        await session.abortTransaction()
+        return next(new AppError('You have an ongoing quiz attempt', 400))
+      }
+    }
+
+    // Determine question set based on questionPoolSize
+    let questionSet = [...quiz.questions]
+    let selectedQuestionIds = []
+
+    // If questionPoolSize is set and less than total questions, select random subset
+    if (quiz.questionPoolSize > 0 && quiz.questionPoolSize < quiz.questions.length) {
+      // Shuffle questions array
+      questionSet = quiz.questions
+        .map((q) => ({ q, sort: Math.random() }))
+        .sort((a, b) => a.sort - b.sort)
+        .map(({ q }) => q)
+        .slice(0, quiz.questionPoolSize)
+    }
+
+    // Extract just the question IDs for storing in the attempt
+    selectedQuestionIds = questionSet.map((q) => q._id)
+
+    // Create new attempt with the selected question set
     const attempt = await QuizAttempt.create(
       [
         {
           quiz: quiz._id,
           user: userId,
-          // attempt: attemptCount + 1,
-          attempt: 1,
+          attempt: attemptCount + 1,
           startTime: new Date(),
+          questionSet: selectedQuestionIds,
         },
       ],
       { session }
     )
 
     // Prepare questions (remove correct answers for MCQs)
-    const questions = quiz.questions.map((q) => ({
+    const questions = questionSet.map((q) => ({
       _id: q._id,
       question: q.question,
       type: q.type,
@@ -639,12 +977,16 @@ exports.startQuiz = async (req, res, next) => {
 
     await session.commitTransaction()
 
+    // Calculate total marks for the selected questions
+    const attemptTotalMarks = questionSet.reduce((sum, q) => sum + q.marks, 0)
+
     res.status(200).json({
       status: 'success',
-      message: 'Quiz attempt started',
       data: {
         attemptId: attempt[0]._id,
         questions,
+        questionCount: questions.length,
+        totalMarks: attemptTotalMarks,
         quizTime: quiz.quizTime,
         startTime: attempt[0].startTime,
       },
@@ -658,6 +1000,143 @@ exports.startQuiz = async (req, res, next) => {
 }
 
 // Submit quiz attempt
+// exports.submitQuiz = async (req, res, next) => {
+//   const session = await mongoose.startSession()
+//   session.startTransaction()
+
+//   try {
+//     const { courseId, moduleId, lessonId, attemptId } = req.params
+//     const { answers } = req.body
+//     const userId = req.user._id
+
+//     // Get attempt and quiz
+//     const attempt = await QuizAttempt.findOne({
+//       _id: attemptId,
+//       user: userId,
+//       status: 'inProgress',
+//     }).session(session)
+
+//     if (!attempt) {
+//       await session.abortTransaction()
+//       return next(new AppError('Quiz attempt not found or already submitted', 404))
+//     }
+
+//     const lesson = await Lesson.findOne({
+//       _id: lessonId,
+//       module: moduleId,
+//       isDeleted: false,
+//     })
+//       .populate({
+//         path: 'quiz',
+//         match: { isDeleted: false },
+//       })
+//       .session(session)
+
+//     if (!lesson || !lesson.quiz) {
+//       await session.abortTransaction()
+//       return next(new AppError('Quiz not found', 404))
+//     }
+
+//     const quiz = lesson.quiz
+
+//     // Check time limit
+//     const timeLimit = quiz.quizTime * 60 * 1000 // Convert to milliseconds
+//     const timeTaken = new Date() - attempt.startTime
+
+//     if (timeTaken > timeLimit) {
+//       await session.abortTransaction()
+//       return next(new AppError('Quiz time limit exceeded', 400))
+//     }
+
+//     // Process answers and calculate score
+//     let totalScore = 0
+//     const processedAnswers = []
+//     let needsManualGrading = false
+
+//     for (const answer of answers) {
+//       const question = quiz.questions.id(answer.questionId)
+//       if (!question) continue
+
+//       const processedAnswer = {
+//         questionId: answer.questionId,
+//         marks: 0,
+//       }
+
+//       if (question.type === 'mcq') {
+//         // Handle MCQ
+//         const correctOption = question.options.find((opt) => opt.isCorrect)
+//         processedAnswer.selectedOption = answer.selectedOption
+//         processedAnswer.isCorrect = correctOption && correctOption.option === answer.selectedOption
+//         processedAnswer.marks = processedAnswer.isCorrect ? question.marks : 0
+//         totalScore += processedAnswer.marks
+//       } else {
+//         // Handle text answer
+//         processedAnswer.textAnswer = answer.textAnswer
+//         needsManualGrading = true
+//       }
+
+//       processedAnswers.push(processedAnswer)
+//     }
+
+//     // Update attempt
+//     attempt.answers = processedAnswers
+//     attempt.submitTime = new Date()
+//     attempt.status = needsManualGrading ? 'submitted' : 'graded'
+
+//     if (!needsManualGrading) {
+//       attempt.score = totalScore
+//       attempt.percentage = (totalScore / quiz.totalMarks) * 100
+//       attempt.passed = attempt.percentage >= quiz.passingScore
+//     }
+
+//     await attempt.save({ session })
+
+//     // If all MCQ and passed, update progress
+//     if (!needsManualGrading && attempt.percentage >= quiz.passingScore) {
+//       let progress = await Progress.findOne({
+//         user: userId,
+//         course: courseId,
+//         module: moduleId,
+//       }).session(session)
+
+//       if (!progress) {
+//         progress = new Progress({
+//           user: userId,
+//           course: courseId,
+//           module: moduleId,
+//           completedLessons: [],
+//           completedQuizzes: [],
+//           progress: 0,
+//           lastAccessed: new Date(),
+//         })
+//       }
+
+//       if (!progress.completedQuizzes.includes(quiz._id)) {
+//         progress.completedQuizzes.push(quiz._id)
+//         await progress.save({ session })
+//       }
+//     }
+
+//     await session.commitTransaction()
+
+//     res.status(200).json({
+//       status: 'success',
+//       data: {
+//         score: attempt.score,
+//         percentage: attempt.percentage,
+//         passed: attempt.passed,
+//         needsManualGrading,
+//         answers: processedAnswers,
+//       },
+//     })
+//   } catch (error) {
+//     await session.abortTransaction()
+//     next(error)
+//   } finally {
+//     session.endSession()
+//   }
+// }
+
 exports.submitQuiz = async (req, res, next) => {
   const session = await mongoose.startSession()
   session.startTransaction()
@@ -706,14 +1185,31 @@ exports.submitQuiz = async (req, res, next) => {
       return next(new AppError('Quiz time limit exceeded', 400))
     }
 
-    // Process answers and calculate score
+    // Process answers and calculate score, only for questions in this attempt's questionSet
     let totalScore = 0
+    let totalPossibleMarks = 0
     const processedAnswers = []
     let needsManualGrading = false
 
+    // Get the set of questions for this attempt
+    const questionSet = attempt.questionSet || []
+    const questionsMap = {}
+
+    // Create a map of question ID to question for quick lookup
+    quiz.questions.forEach((q) => {
+      questionsMap[q._id.toString()] = q
+    })
+
     for (const answer of answers) {
-      const question = quiz.questions.id(answer.questionId)
+      // Skip answers for questions not in this attempt's question set
+      if (!questionSet.includes(answer.questionId) && !questionSet.some((qId) => qId.toString() === answer.questionId.toString())) {
+        continue
+      }
+
+      const question = questionsMap[answer.questionId.toString()]
       if (!question) continue
+
+      totalPossibleMarks += question.marks
 
       const processedAnswer = {
         questionId: answer.questionId,
@@ -743,7 +1239,7 @@ exports.submitQuiz = async (req, res, next) => {
 
     if (!needsManualGrading) {
       attempt.score = totalScore
-      attempt.percentage = (totalScore / quiz.totalMarks) * 100
+      attempt.percentage = totalPossibleMarks > 0 ? (totalScore / totalPossibleMarks) * 100 : 0
       attempt.passed = attempt.percentage >= quiz.passingScore
     }
 
@@ -973,5 +1469,80 @@ exports.getQuizResults = async (req, res, next) => {
     })
   } catch (error) {
     next(error)
+  }
+}
+
+exports.resetUserAttempts = async (req, res, next) => {
+  const session = await mongoose.startSession()
+  session.startTransaction()
+
+  try {
+    const { courseId, moduleId, lessonId } = req.params
+    const { userId } = req.body
+
+    if (!userId) {
+      await session.abortTransaction()
+      return next(new AppError('User ID is required', 400))
+    }
+
+    // Validate lesson exists and has a quiz
+    const lesson = await Lesson.findOne({
+      _id: lessonId,
+      module: moduleId,
+      isDeleted: false,
+    })
+      .populate('quiz')
+      .session(session)
+
+    if (!lesson || !lesson.quiz) {
+      await session.abortTransaction()
+      return next(new AppError('Quiz not found', 404))
+    }
+
+    const quiz = lesson.quiz
+
+    // Check if user exists
+    const user = await User.findById(userId).session(session)
+    if (!user) {
+      await session.abortTransaction()
+      return next(new AppError('User not found', 404))
+    }
+
+    // Get attempt count before deletion
+    const attemptCount = await QuizAttempt.countDocuments({
+      quiz: quiz._id,
+      user: userId,
+    }).session(session)
+
+    if (attemptCount === 0) {
+      await session.abortTransaction()
+      return next(new AppError('No attempts found for this user', 404))
+    }
+
+    // Delete all attempts for this user and quiz
+    await QuizAttempt.deleteMany({
+      quiz: quiz._id,
+      user: userId,
+    }).session(session)
+
+    // Remove this quiz from user's completed quizzes
+    await Progress.updateOne({ user: userId, course: courseId, module: moduleId }, { $pull: { completedQuizzes: quiz._id } }).session(session)
+
+    await session.commitTransaction()
+
+    res.status(200).json({
+      status: 'success',
+      message: `Successfully reset ${attemptCount} attempts for user`,
+      data: {
+        userId,
+        quizId: quiz._id,
+        attemptsReset: attemptCount,
+      },
+    })
+  } catch (error) {
+    await session.abortTransaction()
+    next(error)
+  } finally {
+    session.endSession()
   }
 }

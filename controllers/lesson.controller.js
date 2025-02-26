@@ -1250,7 +1250,8 @@ exports.trackProgress = async (req, res, next) => {
     const userId = req.user._id
 
     // Update overall lesson progress
-    const progressUpdate = await updateProgress(userId, req.params.courseId, req.params.moduleId, lessonId)
+    const progressUpdate = await updateProgre
+    ss(userId, req.params.courseId, req.params.moduleId, lessonId)
 
     res.status(200).json({
       status: 'success',

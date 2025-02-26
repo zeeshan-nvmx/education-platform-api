@@ -2,7 +2,7 @@ const express = require('express')
 const { protect, restrictTo } = require('../middleware/auth')
 const validateMongoId = require('../middleware/validateMongoId')
 
-const { createQuiz, getQuiz, updateQuiz, deleteQuiz, startQuiz, submitQuiz, gradeQuiz, getQuizResults } = require('../controllers/quiz.controller')
+const { createQuiz, getQuiz, updateQuiz, deleteQuiz, startQuiz, submitQuiz, gradeQuiz, getQuizResults, resetUserAttempts } = require('../controllers/quiz.controller')
 
 // mergeParams allows access to params from parent router
 const router = express.Router({ mergeParams: true })
@@ -15,6 +15,9 @@ router.put('/', protect, restrictTo('admin', 'subAdmin'), validateMongoId, updat
 
 // Delete quiz (Admin/SubAdmin only)
 router.delete('/', protect, restrictTo('admin', 'subAdmin'), validateMongoId, deleteQuiz)
+
+// Reset user's quiz attempts (Admin/SubAdmin only)
+router.post('/reset-attempts', protect, restrictTo('admin', 'subAdmin'), validateMongoId, resetUserAttempts)
 
 // Get quiz details
 router.get('/', protect, validateMongoId, getQuiz)
