@@ -232,98 +232,248 @@ exports.deleteQuiz = async (req, res, next) => {
 }
 
 // Get quiz details
+// exports.getQuiz = async (req, res, next) => {
+//   try {
+//     const { courseId, moduleId, lessonId } = req.params
+//     const userId = req.user._id
+
+//     // Check user has access to this module/course - simplified check
+//     const user = await User.findById(userId).select('+role +enrolledCourses').lean()
+
+//     if (!user) {
+//       return next(new AppError('User not found', 404))
+//     }
+
+//     const isAdmin = ['admin', 'subAdmin', 'moderator'].includes(user.role)
+//     let hasAccess = isAdmin
+
+//     if (!isAdmin) {
+//       const enrolledCourse = user.enrolledCourses?.find((ec) => ec.course.toString() === courseId)
+//       hasAccess = enrolledCourse && (enrolledCourse.enrollmentType === 'full' || enrolledCourse.enrolledModules.some((em) => em.module.toString() === moduleId))
+//     }
+
+//     if (!hasAccess) {
+//       return next(new AppError('You do not have access to this module', 403))
+//     }
+
+//     const lesson = await Lesson.findOne({
+//       _id: lessonId,
+//       module: moduleId,
+//       isDeleted: false,
+//     }).populate({
+//       path: 'quiz',
+//       match: { isDeleted: false },
+//     })
+
+//     if (!lesson || !lesson.quiz) {
+//       return next(new AppError('Quiz not found', 404))
+//     }
+
+//     const quiz = lesson.quiz
+
+//     // Check if user can take quiz based on requirements
+//     let canTakeQuiz = true
+
+//     // // Time requirement check
+//     // if (lesson.quizSettings?.minimumTimeRequired > 0) {
+//     //   const timeProgress = await LessonProgress.findOne({
+//     //     user: userId,
+//     //     lesson: lessonId,
+//     //   })
+
+//     //   if (!timeProgress || timeProgress.timeSpent < lesson.quizSettings.minimumTimeRequired * 60) {
+//     //     canTakeQuiz = false
+//     //   }
+//     // }
+
+//     // // Video completion check if required
+//     // if (canTakeQuiz && lesson.quizSettings?.showQuizAt === 'after' && lesson.videoUrl) {
+//     //   const videoProgress = await VideoProgress.findOne({
+//     //     user: userId,
+//     //     lesson: lessonId,
+//     //   })
+
+//     //   if (!videoProgress?.completed) {
+//     //     canTakeQuiz = false
+//     //   }
+//     // }
+
+//     // // Required asset downloads check
+//     // if (canTakeQuiz && lesson.completionRequirements?.downloadAssets?.length > 0) {
+//     //   const requiredAssets = lesson.completionRequirements.downloadAssets.filter((asset) => asset.required)
+
+//     //   if (requiredAssets.length > 0) {
+//     //     const downloadCount = await AssetProgress.countDocuments({
+//     //       user: userId,
+//     //       lesson: lessonId,
+//     //       asset: { $in: requiredAssets.map((a) => a.assetId) },
+//     //     })
+
+//     //     if (downloadCount < requiredAssets.length) {
+//     //       canTakeQuiz = false
+//     //     }
+//     //   }
+//     // }
+
+//     // Get user's previous attempts
+//     const attempts = await QuizAttempt.find({
+//       quiz: quiz._id,
+//       user: userId,
+//     }).sort('-createdAt')
+
+//     // Check if user can take new attempt
+//     const canStartNewAttempt = canTakeQuiz && attempts.length < quiz.maxAttempts
+
+//     res.status(200).json({
+//       status: 'success',
+//       data: {
+//         quiz: {
+//           _id: quiz._id,
+//           title: quiz.title,
+//           quizTime: quiz.quizTime,
+//           passingScore: quiz.passingScore,
+//           maxAttempts: quiz.maxAttempts,
+//           totalMarks: quiz.totalMarks,
+//           questionCount: quiz.questions.length,
+//         },
+//         attempts: attempts.map((attempt) => ({
+//           _id: attempt._id,
+//           score: attempt.score,
+//           percentage: attempt.percentage,
+//           status: attempt.status,
+//           startTime: attempt.startTime,
+//           submitTime: attempt.submitTime,
+//         })),
+//         canTakeQuiz,
+//         canStartNewAttempt,
+//         requirements: lesson.quizSettings,
+//       },
+//     })
+//   } catch (error) {
+//     next(error)
+//   }
+// }
+
+// Get quiz details
 exports.getQuiz = async (req, res, next) => {
   try {
-    const { courseId, moduleId, lessonId } = req.params
-    const userId = req.user._id
+    const { courseId, moduleId, lessonId } = req.params;
+    const userId = req.user._id;
 
     // Check user has access to this module/course - simplified check
-    const user = await User.findById(userId).select('+role +enrolledCourses').lean()
-
+    const user = await User.findById(userId).select('+role +enrolledCourses').lean();
+    
     if (!user) {
-      return next(new AppError('User not found', 404))
+      return next(new AppError('User not found', 404));
     }
-
-    const isAdmin = ['admin', 'subAdmin', 'moderator'].includes(user.role)
-    let hasAccess = isAdmin
-
+    
+    const isAdmin = ['admin', 'subAdmin', 'moderator'].includes(user.role);
+    let hasAccess = isAdmin;
+    
     if (!isAdmin) {
-      const enrolledCourse = user.enrolledCourses?.find((ec) => ec.course.toString() === courseId)
-      hasAccess = enrolledCourse && (enrolledCourse.enrollmentType === 'full' || enrolledCourse.enrolledModules.some((em) => em.module.toString() === moduleId))
+      const enrolledCourse = user.enrolledCourses?.find(ec => ec.course.toString() === courseId);
+      hasAccess = enrolledCourse && (
+        enrolledCourse.enrollmentType === 'full' || 
+        enrolledCourse.enrolledModules.some(em => em.module.toString() === moduleId)
+      );
     }
-
+    
     if (!hasAccess) {
-      return next(new AppError('You do not have access to this module', 403))
+      return next(new AppError('You do not have access to this module', 403));
     }
 
     const lesson = await Lesson.findOne({
       _id: lessonId,
       module: moduleId,
-      isDeleted: false,
+      isDeleted: false
     }).populate({
       path: 'quiz',
-      match: { isDeleted: false },
-    })
+      match: { isDeleted: false }
+    });
 
     if (!lesson || !lesson.quiz) {
-      return next(new AppError('Quiz not found', 404))
+      return next(new AppError('Quiz not found', 404));
     }
 
-    const quiz = lesson.quiz
+    const quiz = lesson.quiz;
 
-    // Check if user can take quiz based on requirements
-    let canTakeQuiz = true
+    // Different response based on user role
+    if (isAdmin) {
+      // For admin users, return full quiz data including all questions and correct answers
+      return res.status(200).json({
+        status: 'success',
+        data: {
+          quiz: {
+            _id: quiz._id,
+            title: quiz.title,
+            quizTime: quiz.quizTime,
+            passingScore: quiz.passingScore,
+            maxAttempts: quiz.maxAttempts,
+            totalMarks: quiz.totalMarks,
+            questions: quiz.questions, // Include full questions with correct answers
+            createdAt: quiz.createdAt,
+            updatedAt: quiz.updatedAt
+          },
+          attemptCount: await QuizAttempt.countDocuments({ quiz: quiz._id }),
+          pendingGrading: await QuizAttempt.countDocuments({ quiz: quiz._id, status: 'submitted' })
+        }
+      });
+    }
 
-    // // Time requirement check
-    // if (lesson.quizSettings?.minimumTimeRequired > 0) {
-    //   const timeProgress = await LessonProgress.findOne({
-    //     user: userId,
-    //     lesson: lessonId,
-    //   })
-
-    //   if (!timeProgress || timeProgress.timeSpent < lesson.quizSettings.minimumTimeRequired * 60) {
-    //     canTakeQuiz = false
-    //   }
-    // }
-
-    // // Video completion check if required
-    // if (canTakeQuiz && lesson.quizSettings?.showQuizAt === 'after' && lesson.videoUrl) {
-    //   const videoProgress = await VideoProgress.findOne({
-    //     user: userId,
-    //     lesson: lessonId,
-    //   })
-
-    //   if (!videoProgress?.completed) {
-    //     canTakeQuiz = false
-    //   }
-    // }
-
-    // // Required asset downloads check
-    // if (canTakeQuiz && lesson.completionRequirements?.downloadAssets?.length > 0) {
-    //   const requiredAssets = lesson.completionRequirements.downloadAssets.filter((asset) => asset.required)
-
-    //   if (requiredAssets.length > 0) {
-    //     const downloadCount = await AssetProgress.countDocuments({
-    //       user: userId,
-    //       lesson: lessonId,
-    //       asset: { $in: requiredAssets.map((a) => a.assetId) },
-    //     })
-
-    //     if (downloadCount < requiredAssets.length) {
-    //       canTakeQuiz = false
-    //     }
-    //   }
-    // }
+    // For regular users, check if they can take quiz
+    let canTakeQuiz = true;
+    
+    // Time requirement check
+    if (lesson.quizSettings?.minimumTimeRequired > 0) {
+      const timeProgress = await LessonProgress.findOne({
+        user: userId,
+        lesson: lessonId
+      });
+      
+      if (!timeProgress || timeProgress.timeSpent < lesson.quizSettings.minimumTimeRequired * 60) {
+        canTakeQuiz = false;
+      }
+    }
+    
+    // Video completion check if required
+    if (canTakeQuiz && lesson.quizSettings?.showQuizAt === 'after' && lesson.videoUrl) {
+      const videoProgress = await VideoProgress.findOne({
+        user: userId,
+        lesson: lessonId
+      });
+      
+      if (!videoProgress?.completed) {
+        canTakeQuiz = false;
+      }
+    }
+    
+    // Required asset downloads check
+    if (canTakeQuiz && lesson.completionRequirements?.downloadAssets?.length > 0) {
+      const requiredAssets = lesson.completionRequirements.downloadAssets.filter(asset => asset.required);
+      
+      if (requiredAssets.length > 0) {
+        const downloadCount = await AssetProgress.countDocuments({
+          user: userId,
+          lesson: lessonId,
+          asset: { $in: requiredAssets.map(a => a.assetId) }
+        });
+        
+        if (downloadCount < requiredAssets.length) {
+          canTakeQuiz = false;
+        }
+      }
+    }
 
     // Get user's previous attempts
     const attempts = await QuizAttempt.find({
       quiz: quiz._id,
-      user: userId,
-    }).sort('-createdAt')
+      user: userId
+    }).sort('-createdAt');
 
     // Check if user can take new attempt
-    const canStartNewAttempt = canTakeQuiz && attempts.length < quiz.maxAttempts
+    const canStartNewAttempt = canTakeQuiz && attempts.length < quiz.maxAttempts;
 
+    // Return regular user data
     res.status(200).json({
       status: 'success',
       data: {
@@ -334,23 +484,24 @@ exports.getQuiz = async (req, res, next) => {
           passingScore: quiz.passingScore,
           maxAttempts: quiz.maxAttempts,
           totalMarks: quiz.totalMarks,
-          questionCount: quiz.questions.length,
+          questionCount: quiz.questions.length
         },
-        attempts: attempts.map((attempt) => ({
+        attempts: attempts.map(attempt => ({
           _id: attempt._id,
           score: attempt.score,
           percentage: attempt.percentage,
           status: attempt.status,
           startTime: attempt.startTime,
           submitTime: attempt.submitTime,
+          passed: attempt.passed
         })),
         canTakeQuiz,
         canStartNewAttempt,
-        requirements: lesson.quizSettings,
-      },
-    })
+        requirements: lesson.quizSettings
+      }
+    });
   } catch (error) {
-    next(error)
+    next(error);
   }
 }
 
