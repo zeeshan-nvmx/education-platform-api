@@ -48,8 +48,8 @@ app.use('/api/auth', require('./routes/auth.routes'))
 app.use('/api/users', require('./routes/user.routes'))
 app.use('/api/admin', require('./routes/admin.routes'))
 app.use('/api/courses', require('./routes/course.routes'))
-// app.use('/api/quizzes', require('./routes/quizzes'));
-app.use('/api/payments', require('./routes/payment.routes'));
+app.use('/api/payments', require('./routes/payment.routes'))
+app.use('/api/final-cert', require('./routes/certificate.routes'))
 // app.use('/api/discounts', require('./routes/discounts'));
 // app.use('/api/progress', require('./routes/progress'));
 // app.use('/api/reviews', require('./routes/reviews'));

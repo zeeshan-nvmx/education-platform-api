@@ -166,14 +166,14 @@ exports.createQuiz = async (req, res, next) => {
   }
 }
 
-// Update a quiz
+// // Update a quiz
 // exports.updateQuiz = async (req, res, next) => {
 //   const session = await mongoose.startSession()
 //   session.startTransaction()
 
 //   try {
 //     const { courseId, moduleId, lessonId } = req.params
-//     const { title, quizTime, passingScore, questions, maxAttempts } = req.body
+//     const { title, quizTime, passingScore, questions, maxAttempts, questionPoolSize } = req.body
 
 //     // Validate lesson exists and has a quiz
 //     const lesson = await Lesson.findOne({
@@ -205,6 +205,24 @@ exports.createQuiz = async (req, res, next) => {
 //     if (quizTime) updateData.quizTime = quizTime
 //     if (passingScore) updateData.passingScore = passingScore
 //     if (maxAttempts) updateData.maxAttempts = maxAttempts
+//     if (questionPoolSize !== undefined) {
+//       // If updating both questions and pool size
+//       if (questions && !hasAttempts) {
+//         if (questionPoolSize > questions.length) {
+//           await session.abortTransaction()
+//           return next(new AppError('Question pool size cannot exceed total number of questions', 400))
+//         }
+//         updateData.questionPoolSize = questionPoolSize
+//       }
+//       // If only updating pool size (check against existing questions)
+//       else if (!questions) {
+//         if (questionPoolSize > quiz.questions.length) {
+//           await session.abortTransaction()
+//           return next(new AppError('Question pool size cannot exceed total number of questions', 400))
+//         }
+//         updateData.questionPoolSize = questionPoolSize
+//       }
+//     }
 
 //     // Only update questions if there are no attempts
 //     if (questions && !hasAttempts) {
@@ -246,102 +264,101 @@ exports.createQuiz = async (req, res, next) => {
 //   }
 // }
 
+// Update a quiz - Allow admins to update everything regardless of attempts
 exports.updateQuiz = async (req, res, next) => {
-  const session = await mongoose.startSession()
-  session.startTransaction()
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
   try {
-    const { courseId, moduleId, lessonId } = req.params
-    const { title, quizTime, passingScore, questions, maxAttempts, questionPoolSize } = req.body
+    const { courseId, moduleId, lessonId } = req.params;
+    const { title, quizTime, passingScore, questions, maxAttempts, questionPoolSize } = req.body;
 
     // Validate lesson exists and has a quiz
     const lesson = await Lesson.findOne({
       _id: lessonId,
       module: moduleId,
       isDeleted: false,
-    })
-      .populate('quiz')
-      .session(session)
+    }).populate('quiz').session(session);
 
     if (!lesson) {
-      await session.abortTransaction()
-      return next(new AppError('Lesson not found', 404))
+      await session.abortTransaction();
+      return next(new AppError('Lesson not found', 404));
     }
 
     if (!lesson.quiz) {
-      await session.abortTransaction()
-      return next(new AppError('Quiz not found for this lesson', 404))
+      await session.abortTransaction();
+      return next(new AppError('Quiz not found for this lesson', 404));
     }
 
-    const quiz = lesson.quiz
+    const quiz = lesson.quiz;
 
-    // Check if there are existing attempts - if so, restrict certain changes
-    const hasAttempts = await QuizAttempt.exists({ quiz: quiz._id }).session(session)
-
-    // Allow updating basic info regardless of attempts
-    const updateData = {}
-    if (title) updateData.title = title
-    if (quizTime) updateData.quizTime = quizTime
-    if (passingScore) updateData.passingScore = passingScore
-    if (maxAttempts) updateData.maxAttempts = maxAttempts
-    if (questionPoolSize !== undefined) {
-      // If updating both questions and pool size
-      if (questions && !hasAttempts) {
-        if (questionPoolSize > questions.length) {
-          await session.abortTransaction()
-          return next(new AppError('Question pool size cannot exceed total number of questions', 400))
-        }
-        updateData.questionPoolSize = questionPoolSize
-      }
-      // If only updating pool size (check against existing questions)
-      else if (!questions) {
-        if (questionPoolSize > quiz.questions.length) {
-          await session.abortTransaction()
-          return next(new AppError('Question pool size cannot exceed total number of questions', 400))
-        }
-        updateData.questionPoolSize = questionPoolSize
-      }
-    }
-
-    // Only update questions if there are no attempts
-    if (questions && !hasAttempts) {
-      updateData.questions = questions.map((q) => ({
+    // Create update data object with all fields that are provided
+    const updateData = {};
+    if (title) updateData.title = title;
+    if (quizTime) updateData.quizTime = quizTime;
+    if (passingScore) updateData.passingScore = passingScore;
+    if (maxAttempts) updateData.maxAttempts = maxAttempts;
+    
+    // Update questions if provided
+    if (questions) {
+      updateData.questions = questions.map(q => ({
         question: q.question,
         type: q.options ? 'mcq' : 'text',
         options: q.options,
-        marks: q.marks || 1,
-      }))
-
+        marks: q.marks || 1
+      }));
+      
       // Recalculate totalMarks
-      updateData.totalMarks = questions.reduce((sum, q) => sum + (q.marks || 1), 0)
-    } else if (questions && hasAttempts) {
-      await session.abortTransaction()
-      return next(new AppError('Cannot modify quiz questions when there are existing attempts', 400))
+      updateData.totalMarks = questions.reduce((sum, q) => sum + (q.marks || 1), 0);
+    }
+
+    // Update questionPoolSize if provided
+    if (questionPoolSize !== undefined) {
+      // If updating both questions and pool size
+      if (questions) {
+        if (questionPoolSize > questions.length && questionPoolSize !== 0) {
+          await session.abortTransaction();
+          return next(new AppError('Question pool size cannot exceed total number of questions', 400));
+        }
+        updateData.questionPoolSize = questionPoolSize;
+      } 
+      // If only updating pool size (check against existing questions)
+      else {
+        if (questionPoolSize > quiz.questions.length && questionPoolSize !== 0) {
+          await session.abortTransaction();
+          return next(new AppError('Question pool size cannot exceed total number of questions', 400));
+        }
+        updateData.questionPoolSize = questionPoolSize;
+      }
     }
 
     // Update the quiz
-    const updatedQuiz = await Quiz.findByIdAndUpdate(quiz._id, updateData, { new: true, runValidators: true, session })
+    const updatedQuiz = await Quiz.findByIdAndUpdate(
+      quiz._id,
+      updateData,
+      { new: true, runValidators: true, session }
+    );
 
     // Update lesson quiz settings if necessary
     if (passingScore) {
-      lesson.quizSettings.minimumPassingScore = passingScore
-      await lesson.save({ session })
+      lesson.quizSettings.minimumPassingScore = passingScore;
+      await lesson.save({ session });
     }
 
-    await session.commitTransaction()
+    await session.commitTransaction();
 
     res.status(200).json({
       status: 'success',
       message: 'Quiz updated successfully',
-      data: updatedQuiz,
-    })
+      data: updatedQuiz
+    });
   } catch (error) {
-    await session.abortTransaction()
-    next(error)
+    await session.abortTransaction();
+    next(error);
   } finally {
-    session.endSession()
+    session.endSession();
   }
-}
+};
 
 // Delete a quiz
 exports.deleteQuiz = async (req, res, next) => {
