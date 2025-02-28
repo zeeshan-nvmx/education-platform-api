@@ -79,51 +79,15 @@ const updateLessonSchema = Joi.object({
 
 
 // Helper Functions
+
 // async function checkQuizRequirements(userId, lessonId) {
 //   try {
 //     const lesson = await Lesson.findById(lessonId).populate('quiz')
-//     if (!lesson || !lesson.quiz) return true
+//     if (!lesson || !lesson.quiz) return true // No quiz means requirements are met
 
-//     // Get user's time spent on lesson
-//     const timeSpentRecord = await LessonProgress.findOne({
-//       user: userId,
-//       lesson: lessonId,
-//     })
-
-//     const timeSpent = timeSpentRecord?.timeSpent || 0
-//     if (lesson.quizSettings?.minimumTimeRequired > 0 && timeSpent < lesson.quizSettings.minimumTimeRequired * 60) {
-//       // Convert minutes to seconds
-//       return false
-//     }
-
-//     // Check content viewing requirement for 'after' setting
-//     if (lesson.quizSettings?.showQuizAt === 'after') {
-//       // Check video progress if video exists
-//       if (lesson.videoUrl) {
-//         const videoProgress = await VideoProgress.findOne({
-//           user: userId,
-//           lesson: lessonId,
-//         })
-
-//         if (!videoProgress?.completed) {
-//           return false
-//         }
-//       }
-
-//       // Check required asset downloads
-//       const requiredAssets = lesson.completionRequirements?.downloadAssets?.filter((asset) => asset.required) || []
-
-//       if (requiredAssets.length > 0) {
-//         const assetDownloads = await AssetProgress.find({
-//           user: userId,
-//           lesson: lessonId,
-//           asset: { $in: requiredAssets.map((a) => a.assetId) },
-//         })
-
-//         if (assetDownloads.length < requiredAssets.length) {
-//           return false
-//         }
-//       }
+//     // Only check if the quiz exists and is required
+//     if (lesson.quizSettings?.required) {
+//       return await validateQuizCompletion(userId, lessonId)
 //     }
 
 //     return true
@@ -136,11 +100,101 @@ const updateLessonSchema = Joi.object({
 async function checkQuizRequirements(userId, lessonId) {
   try {
     const lesson = await Lesson.findById(lessonId).populate('quiz')
-    if (!lesson || !lesson.quiz) return true // No quiz means requirements are met
+    if (!lesson || !lesson.quiz) return true // No quiz = no requirements to check
 
-    // Only check if the quiz exists and is required
-    if (lesson.quizSettings?.required) {
-      return await validateQuizCompletion(userId, lessonId)
+    // Get user role to check if they're admin/moderator/subAdmin
+    const user = await User.findById(userId).select('+role')
+    const isAdmin = user && ['admin', 'subAdmin', 'moderator'].includes(user.role)
+
+    // Admins bypass all requirements
+    if (isAdmin) return true
+
+    // Get user's time spent on lesson
+    const timeSpentRecord = await LessonProgress.findOne({
+      user: userId,
+      lesson: lessonId,
+    })
+
+    // Check minimum time requirement
+    if (lesson.quizSettings?.minimumTimeRequired > 0) {
+      const timeSpent = timeSpentRecord?.timeSpent || 0
+      if (timeSpent < lesson.quizSettings.minimumTimeRequired * 60) {
+        // Convert minutes to seconds
+        return false
+      }
+    }
+
+    // Check for in-progress attempts and handle expired ones
+    const inProgressAttempts = await QuizAttempt.find({
+      quiz: lesson.quiz._id,
+      user: userId,
+      status: 'inProgress',
+    })
+
+    // If there are in-progress attempts, check if they've expired
+    for (const attempt of inProgressAttempts) {
+      const timeLimit = lesson.quiz.quizTime * 60 * 1000 // Convert to milliseconds
+      const timeSinceStart = new Date() - attempt.startTime
+
+      if (timeSinceStart <= timeLimit) {
+        // Still valid attempt within time window - user can't take a new quiz
+        return false
+      }
+
+      // If we're here, the attempt has expired but is still marked as inProgress
+      // We'll mark it as submitted with zero score (same logic as in startQuiz)
+      // Don't await this - we're just triggering the update but not waiting
+      // This avoids performance issues in the getLesson endpoint
+      QuizAttempt.findByIdAndUpdate(attempt._id, {
+        status: 'submitted',
+        submitTime: new Date(attempt.startTime.getTime() + timeLimit),
+        score: 0,
+        percentage: 0,
+        passed: false,
+      }).exec()
+
+      // Continue checking other requirements - this attempt is now considered expired
+    }
+
+    // Check content viewing requirement for 'after' setting
+    if (lesson.quizSettings?.showQuizAt === 'after') {
+      // Check video progress if video exists
+      if (lesson.videoUrl) {
+        const videoProgress = await VideoProgress.findOne({
+          user: userId,
+          lesson: lessonId,
+        })
+
+        if (!videoProgress?.completed) {
+          return false
+        }
+      }
+
+      // Check required asset downloads
+      const requiredAssets = lesson.completionRequirements?.downloadAssets?.filter((asset) => asset.required) || []
+
+      if (requiredAssets.length > 0) {
+        const assetDownloads = await AssetProgress.find({
+          user: userId,
+          lesson: lessonId,
+          asset: { $in: requiredAssets.map((a) => a.assetId) },
+        })
+
+        if (assetDownloads.length < requiredAssets.length) {
+          return false
+        }
+      }
+    }
+
+    // Check if max attempts reached
+    const attemptCount = await QuizAttempt.countDocuments({
+      quiz: lesson.quiz._id,
+      user: userId,
+      status: { $ne: 'inProgress' }, // Only count completed/submitted/graded attempts
+    })
+
+    if (attemptCount >= lesson.quiz.maxAttempts) {
+      return false
     }
 
     return true

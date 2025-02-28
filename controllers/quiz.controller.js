@@ -1,85 +1,6 @@
 const mongoose = require('mongoose')
-const { Quiz, QuizAttempt, Lesson, Progress, User, LessonProgress, VideoProgress, AssetProgress } = require('../models')
+const { Quiz, QuizAttempt, Lesson, Progress, User, LessonProgress, Module } = require('../models')
 const { AppError } = require('../utils/errors')
-
-// Create a new quiz
-// exports.createQuiz = async (req, res, next) => {
-//   const session = await mongoose.startSession()
-//   session.startTransaction()
-
-//   try {
-//     const { courseId, moduleId, lessonId } = req.params
-//     const { title, quizTime, passingScore, questions, maxAttempts = 3 } = req.body
-
-//     // Validate lesson exists
-//     const lesson = await Lesson.findOne({
-//       _id: lessonId,
-//       module: moduleId,
-//       isDeleted: false,
-//     }).session(session)
-
-//     if (!lesson) {
-//       await session.abortTransaction()
-//       return next(new AppError('Lesson not found', 404))
-//     }
-
-//     // Check if quiz already exists
-//     if (lesson.quiz) {
-//       await session.abortTransaction()
-//       return next(new AppError('Quiz already exists for this lesson', 400))
-//     }
-
-//     // Calculate totalMarks from questions
-//     const totalMarks = questions.reduce((sum, q) => sum + (q.marks || 1), 0)
-
-//     // Create quiz
-//     const quiz = await Quiz.create(
-//       [
-//         {
-//           lesson: lessonId,
-//           title,
-//           quizTime,
-//           passingScore,
-//           maxAttempts,
-//           totalMarks,
-//           questions: questions.map((q) => ({
-//             question: q.question,
-//             type: q.options ? 'mcq' : 'text',
-//             options: q.options,
-//             marks: q.marks || 1,
-//           })),
-//         },
-//       ],
-//       { session }
-//     )
-
-//     // Update lesson with quiz reference and quiz settings
-//     lesson.quiz = quiz[0]._id
-//     lesson.quizSettings = {
-//       required: true, // Since a quiz is being created
-//       minimumPassingScore: passingScore,
-//       allowReview: true,
-//       blockProgress: true,
-//       showQuizAt: 'after',
-//       minimumTimeRequired: 0,
-//     }
-
-//     await lesson.save({ session })
-
-//     await session.commitTransaction()
-
-//     res.status(201).json({
-//       status: 'success',
-//       message: 'Quiz created successfully',
-//       data: quiz[0],
-//     })
-//   } catch (error) {
-//     await session.abortTransaction()
-//     next(error)
-//   } finally {
-//     session.endSession()
-//   }
-// }
 
 exports.createQuiz = async (req, res, next) => {
   const session = await mongoose.startSession()
@@ -165,104 +86,6 @@ exports.createQuiz = async (req, res, next) => {
     session.endSession()
   }
 }
-
-// // Update a quiz
-// exports.updateQuiz = async (req, res, next) => {
-//   const session = await mongoose.startSession()
-//   session.startTransaction()
-
-//   try {
-//     const { courseId, moduleId, lessonId } = req.params
-//     const { title, quizTime, passingScore, questions, maxAttempts, questionPoolSize } = req.body
-
-//     // Validate lesson exists and has a quiz
-//     const lesson = await Lesson.findOne({
-//       _id: lessonId,
-//       module: moduleId,
-//       isDeleted: false,
-//     })
-//       .populate('quiz')
-//       .session(session)
-
-//     if (!lesson) {
-//       await session.abortTransaction()
-//       return next(new AppError('Lesson not found', 404))
-//     }
-
-//     if (!lesson.quiz) {
-//       await session.abortTransaction()
-//       return next(new AppError('Quiz not found for this lesson', 404))
-//     }
-
-//     const quiz = lesson.quiz
-
-//     // Check if there are existing attempts - if so, restrict certain changes
-//     const hasAttempts = await QuizAttempt.exists({ quiz: quiz._id }).session(session)
-
-//     // Allow updating basic info regardless of attempts
-//     const updateData = {}
-//     if (title) updateData.title = title
-//     if (quizTime) updateData.quizTime = quizTime
-//     if (passingScore) updateData.passingScore = passingScore
-//     if (maxAttempts) updateData.maxAttempts = maxAttempts
-//     if (questionPoolSize !== undefined) {
-//       // If updating both questions and pool size
-//       if (questions && !hasAttempts) {
-//         if (questionPoolSize > questions.length) {
-//           await session.abortTransaction()
-//           return next(new AppError('Question pool size cannot exceed total number of questions', 400))
-//         }
-//         updateData.questionPoolSize = questionPoolSize
-//       }
-//       // If only updating pool size (check against existing questions)
-//       else if (!questions) {
-//         if (questionPoolSize > quiz.questions.length) {
-//           await session.abortTransaction()
-//           return next(new AppError('Question pool size cannot exceed total number of questions', 400))
-//         }
-//         updateData.questionPoolSize = questionPoolSize
-//       }
-//     }
-
-//     // Only update questions if there are no attempts
-//     if (questions && !hasAttempts) {
-//       updateData.questions = questions.map((q) => ({
-//         question: q.question,
-//         type: q.options ? 'mcq' : 'text',
-//         options: q.options,
-//         marks: q.marks || 1,
-//       }))
-
-//       // Recalculate totalMarks
-//       updateData.totalMarks = questions.reduce((sum, q) => sum + (q.marks || 1), 0)
-//     } else if (questions && hasAttempts) {
-//       await session.abortTransaction()
-//       return next(new AppError('Cannot modify quiz questions when there are existing attempts', 400))
-//     }
-
-//     // Update the quiz
-//     const updatedQuiz = await Quiz.findByIdAndUpdate(quiz._id, updateData, { new: true, runValidators: true, session })
-
-//     // Update lesson quiz settings if necessary
-//     if (passingScore) {
-//       lesson.quizSettings.minimumPassingScore = passingScore
-//       await lesson.save({ session })
-//     }
-
-//     await session.commitTransaction()
-
-//     res.status(200).json({
-//       status: 'success',
-//       message: 'Quiz updated successfully',
-//       data: updatedQuiz,
-//     })
-//   } catch (error) {
-//     await session.abortTransaction()
-//     next(error)
-//   } finally {
-//     session.endSession()
-//   }
-// }
 
 // Update a quiz - Allow admins to update everything regardless of attempts
 exports.updateQuiz = async (req, res, next) => {
@@ -424,7 +247,7 @@ exports.deleteQuiz = async (req, res, next) => {
   }
 }
 
-// Get quiz details
+
 // exports.getQuiz = async (req, res, next) => {
 //   try {
 //     const { courseId, moduleId, lessonId } = req.params
@@ -464,49 +287,82 @@ exports.deleteQuiz = async (req, res, next) => {
 
 //     const quiz = lesson.quiz
 
-//     // Check if user can take quiz based on requirements
+//     // Different response based on user role
+//     if (isAdmin) {
+//       // For admin users, return full quiz data including all questions and correct answers
+//       return res.status(200).json({
+//         status: 'success',
+//         data: {
+//           quiz: {
+//             _id: quiz._id,
+//             title: quiz.title,
+//             quizTime: quiz.quizTime,
+//             passingScore: quiz.passingScore,
+//             maxAttempts: quiz.maxAttempts,
+//             totalMarks: quiz.totalMarks,
+//             questionPoolSize: quiz.questionPoolSize,
+//             questions: quiz.questions, // Include full questions with correct answers
+//             createdAt: quiz.createdAt,
+//             updatedAt: quiz.updatedAt,
+//           },
+//           attemptCount: await QuizAttempt.countDocuments({ quiz: quiz._id }),
+//           pendingGrading: await QuizAttempt.countDocuments({ quiz: quiz._id, status: 'submitted' }),
+//         },
+//       })
+//     }
+
+//     // For regular users, determine if they can take the quiz
+//     // IMPORTANT: Admins and moderators bypass all restrictions
 //     let canTakeQuiz = true
+//     let blockedReason = null
 
-//     // // Time requirement check
-//     // if (lesson.quizSettings?.minimumTimeRequired > 0) {
-//     //   const timeProgress = await LessonProgress.findOne({
-//     //     user: userId,
-//     //     lesson: lessonId,
-//     //   })
+//     // Time requirement check - Only if specifically set
+//     if (lesson.quizSettings?.minimumTimeRequired > 0) {
+//       const timeProgress = await LessonProgress.findOne({
+//         user: userId,
+//         lesson: lessonId,
+//       })
 
-//     //   if (!timeProgress || timeProgress.timeSpent < lesson.quizSettings.minimumTimeRequired * 60) {
-//     //     canTakeQuiz = false
-//     //   }
-//     // }
+//       if (!timeProgress || timeProgress.timeSpent < lesson.quizSettings.minimumTimeRequired * 60) {
+//         canTakeQuiz = false
+//         blockedReason = `You need to spend at least ${lesson.quizSettings.minimumTimeRequired} minutes on this lesson`
+//       }
+//     }
 
-//     // // Video completion check if required
-//     // if (canTakeQuiz && lesson.quizSettings?.showQuizAt === 'after' && lesson.videoUrl) {
-//     //   const videoProgress = await VideoProgress.findOne({
-//     //     user: userId,
-//     //     lesson: lessonId,
-//     //   })
+//     // Previous lesson completion check - Optional based on module settings
+//     // Get the module to check if sequential completion is required
+//     const module = await Module.findById(moduleId)
 
-//     //   if (!videoProgress?.completed) {
-//     //     canTakeQuiz = false
-//     //   }
-//     // }
+//     // Only check previous lesson if this isn't the first lesson and sequentialProgress is enabled
+//     if (canTakeQuiz && module && module.sequentialProgress && lesson.order > 1) {
+//       // Find previous lesson
+//       const previousLesson = await Lesson.findOne({
+//         module: moduleId,
+//         order: lesson.order - 1,
+//         isDeleted: false,
+//       })
 
-//     // // Required asset downloads check
-//     // if (canTakeQuiz && lesson.completionRequirements?.downloadAssets?.length > 0) {
-//     //   const requiredAssets = lesson.completionRequirements.downloadAssets.filter((asset) => asset.required)
+//       if (previousLesson) {
+//         // Check if previous lesson is completed
+//         const progress = await Progress.findOne({
+//           user: userId,
+//           module: moduleId,
+//         })
 
-//     //   if (requiredAssets.length > 0) {
-//     //     const downloadCount = await AssetProgress.countDocuments({
-//     //       user: userId,
-//     //       lesson: lessonId,
-//     //       asset: { $in: requiredAssets.map((a) => a.assetId) },
-//     //     })
+//         if (!progress || !progress.completedLessons.includes(previousLesson._id)) {
+//           canTakeQuiz = false
+//           blockedReason = 'You need to complete the previous lesson first'
+//         }
 
-//     //     if (downloadCount < requiredAssets.length) {
-//     //       canTakeQuiz = false
-//     //     }
-//     //   }
-//     // }
+//         // If previous lesson has a quiz that blocks progress
+//         if (previousLesson.quiz && previousLesson.quizSettings?.blockProgress) {
+//           if (!progress || !progress.completedQuizzes.includes(previousLesson.quiz)) {
+//             canTakeQuiz = false
+//             blockedReason = 'You need to pass the quiz in the previous lesson first'
+//           }
+//         }
+//       }
+//     }
 
 //     // Get user's previous attempts
 //     const attempts = await QuizAttempt.find({
@@ -514,9 +370,26 @@ exports.deleteQuiz = async (req, res, next) => {
 //       user: userId,
 //     }).sort('-createdAt')
 
-//     // Check if user can take new attempt
-//     const canStartNewAttempt = canTakeQuiz && attempts.length < quiz.maxAttempts
+//     // Check if user has reached the maximum attempts
+//     const completedAttempts = attempts.filter((attempt) => attempt.status !== 'inProgress')
+//     const canStartNewAttempt = canTakeQuiz && completedAttempts.length < quiz.maxAttempts
 
+//     // Check if there are any in-progress attempts
+//     const inProgressAttempt = attempts.find((attempt) => attempt.status === 'inProgress')
+//     let ongoingAttemptId = null
+
+//     if (inProgressAttempt) {
+//       // Check if the attempt has expired based on quiz time
+//       const timeLimit = quiz.quizTime * 60 * 1000 // Convert to milliseconds
+//       const timeSinceStart = new Date() - inProgressAttempt.startTime
+
+//       if (timeSinceStart <= timeLimit) {
+//         // Still valid, provide the attempt ID
+//         ongoingAttemptId = inProgressAttempt._id
+//       }
+//     }
+
+//     // Return regular user data with improved diagnostic information
 //     res.status(200).json({
 //       status: 'success',
 //       data: {
@@ -528,6 +401,7 @@ exports.deleteQuiz = async (req, res, next) => {
 //           maxAttempts: quiz.maxAttempts,
 //           totalMarks: quiz.totalMarks,
 //           questionCount: quiz.questions.length,
+//           questionPoolSize: quiz.questionPoolSize,
 //         },
 //         attempts: attempts.map((attempt) => ({
 //           _id: attempt._id,
@@ -536,9 +410,13 @@ exports.deleteQuiz = async (req, res, next) => {
 //           status: attempt.status,
 //           startTime: attempt.startTime,
 //           submitTime: attempt.submitTime,
+//           passed: attempt.passed,
 //         })),
 //         canTakeQuiz,
 //         canStartNewAttempt,
+//         ongoingAttemptId,
+//         blockedReason,
+//         completedAttemptsCount: completedAttempts.length,
 //         requirements: lesson.quizSettings,
 //       },
 //     })
@@ -546,157 +424,6 @@ exports.deleteQuiz = async (req, res, next) => {
 //     next(error)
 //   }
 // }
-
-// Get quiz details
-exports.getQuiz = async (req, res, next) => {
-  try {
-    const { courseId, moduleId, lessonId } = req.params;
-    const userId = req.user._id;
-
-    // Check user has access to this module/course - simplified check
-    const user = await User.findById(userId).select('+role +enrolledCourses').lean();
-    
-    if (!user) {
-      return next(new AppError('User not found', 404));
-    }
-    
-    const isAdmin = ['admin', 'subAdmin', 'moderator'].includes(user.role);
-    let hasAccess = isAdmin;
-    
-    if (!isAdmin) {
-      const enrolledCourse = user.enrolledCourses?.find(ec => ec.course.toString() === courseId);
-      hasAccess = enrolledCourse && (
-        enrolledCourse.enrollmentType === 'full' || 
-        enrolledCourse.enrolledModules.some(em => em.module.toString() === moduleId)
-      );
-    }
-    
-    if (!hasAccess) {
-      return next(new AppError('You do not have access to this module', 403));
-    }
-
-    const lesson = await Lesson.findOne({
-      _id: lessonId,
-      module: moduleId,
-      isDeleted: false
-    }).populate({
-      path: 'quiz',
-      match: { isDeleted: false }
-    });
-
-    if (!lesson || !lesson.quiz) {
-      return next(new AppError('Quiz not found', 404));
-    }
-
-    const quiz = lesson.quiz;
-
-    // Different response based on user role
-    if (isAdmin) {
-      // For admin users, return full quiz data including all questions and correct answers
-      return res.status(200).json({
-        status: 'success',
-        data: {
-          quiz: {
-            _id: quiz._id,
-            title: quiz.title,
-            quizTime: quiz.quizTime,
-            passingScore: quiz.passingScore,
-            maxAttempts: quiz.maxAttempts,
-            totalMarks: quiz.totalMarks,
-            questions: quiz.questions, // Include full questions with correct answers
-            createdAt: quiz.createdAt,
-            updatedAt: quiz.updatedAt
-          },
-          attemptCount: await QuizAttempt.countDocuments({ quiz: quiz._id }),
-          pendingGrading: await QuizAttempt.countDocuments({ quiz: quiz._id, status: 'submitted' })
-        }
-      });
-    }
-
-    // For regular users, check if they can take quiz
-    let canTakeQuiz = true;
-    
-    // Time requirement check
-    if (lesson.quizSettings?.minimumTimeRequired > 0) {
-      const timeProgress = await LessonProgress.findOne({
-        user: userId,
-        lesson: lessonId
-      });
-      
-      if (!timeProgress || timeProgress.timeSpent < lesson.quizSettings.minimumTimeRequired * 60) {
-        canTakeQuiz = false;
-      }
-    }
-    
-    // Video completion check if required
-    if (canTakeQuiz && lesson.quizSettings?.showQuizAt === 'after' && lesson.videoUrl) {
-      const videoProgress = await VideoProgress.findOne({
-        user: userId,
-        lesson: lessonId
-      });
-      
-      if (!videoProgress?.completed) {
-        canTakeQuiz = false;
-      }
-    }
-    
-    // Required asset downloads check
-    if (canTakeQuiz && lesson.completionRequirements?.downloadAssets?.length > 0) {
-      const requiredAssets = lesson.completionRequirements.downloadAssets.filter(asset => asset.required);
-      
-      if (requiredAssets.length > 0) {
-        const downloadCount = await AssetProgress.countDocuments({
-          user: userId,
-          lesson: lessonId,
-          asset: { $in: requiredAssets.map(a => a.assetId) }
-        });
-        
-        if (downloadCount < requiredAssets.length) {
-          canTakeQuiz = false;
-        }
-      }
-    }
-
-    // Get user's previous attempts
-    const attempts = await QuizAttempt.find({
-      quiz: quiz._id,
-      user: userId
-    }).sort('-createdAt');
-
-    // Check if user can take new attempt
-    const canStartNewAttempt = canTakeQuiz && attempts.length < quiz.maxAttempts;
-
-    // Return regular user data
-    res.status(200).json({
-      status: 'success',
-      data: {
-        quiz: {
-          _id: quiz._id,
-          title: quiz.title,
-          quizTime: quiz.quizTime,
-          passingScore: quiz.passingScore,
-          maxAttempts: quiz.maxAttempts,
-          totalMarks: quiz.totalMarks,
-          questionCount: quiz.questions.length
-        },
-        attempts: attempts.map(attempt => ({
-          _id: attempt._id,
-          score: attempt.score,
-          percentage: attempt.percentage,
-          status: attempt.status,
-          startTime: attempt.startTime,
-          submitTime: attempt.submitTime,
-          passed: attempt.passed
-        })),
-        canTakeQuiz,
-        canStartNewAttempt,
-        requirements: lesson.quizSettings
-      }
-    });
-  } catch (error) {
-    next(error);
-  }
-}
 
 // Start a new quiz attempt
 
@@ -879,6 +606,158 @@ exports.getQuiz = async (req, res, next) => {
 // }
 
 // Start a new quiz attempt with improved error handling
+
+exports.getQuiz = async (req, res, next) => {
+  try {
+    const { courseId, moduleId, lessonId } = req.params
+    const userId = req.user._id
+
+    // Check user has access to this module/course - simplified check
+    const user = await User.findById(userId).select('+role +enrolledCourses').lean()
+
+    if (!user) {
+      return next(new AppError('User not found', 404))
+    }
+
+    const isAdmin = ['admin', 'subAdmin', 'moderator'].includes(user.role)
+    let hasAccess = isAdmin
+
+    if (!isAdmin) {
+      const enrolledCourse = user.enrolledCourses?.find((ec) => ec.course.toString() === courseId)
+      hasAccess = enrolledCourse && (enrolledCourse.enrollmentType === 'full' || enrolledCourse.enrolledModules.some((em) => em.module.toString() === moduleId))
+    }
+
+    if (!hasAccess) {
+      return next(new AppError('You do not have access to this module', 403))
+    }
+
+    const lesson = await Lesson.findOne({
+      _id: lessonId,
+      module: moduleId,
+      isDeleted: false,
+    }).populate({
+      path: 'quiz',
+      match: { isDeleted: false },
+    })
+
+    if (!lesson || !lesson.quiz) {
+      return next(new AppError('Quiz not found', 404))
+    }
+
+    const quiz = lesson.quiz
+
+    // Different response based on user role
+    if (isAdmin) {
+      // For admin users, return full quiz data including all questions and correct answers
+      return res.status(200).json({
+        status: 'success',
+        data: {
+          quiz: {
+            _id: quiz._id,
+            title: quiz.title,
+            quizTime: quiz.quizTime,
+            passingScore: quiz.passingScore,
+            maxAttempts: quiz.maxAttempts,
+            totalMarks: quiz.totalMarks,
+            questionPoolSize: quiz.questionPoolSize,
+            questions: quiz.questions, // Include full questions with correct answers
+            createdAt: quiz.createdAt,
+            updatedAt: quiz.updatedAt,
+          },
+          attemptCount: await QuizAttempt.countDocuments({ quiz: quiz._id }),
+          pendingGrading: await QuizAttempt.countDocuments({ quiz: quiz._id, status: 'submitted' }),
+        },
+      })
+    }
+
+    // For regular users, determine if they can take the quiz
+    let canTakeQuiz = true
+    let blockedReason = null
+
+    // Time requirement check - Only if specifically set
+    if (lesson.quizSettings?.minimumTimeRequired > 0) {
+      const timeProgress = await LessonProgress.findOne({
+        user: userId,
+        lesson: lessonId,
+      })
+
+      if (!timeProgress || timeProgress.timeSpent < lesson.quizSettings.minimumTimeRequired * 60) {
+        canTakeQuiz = false
+        blockedReason = `You need to spend at least ${lesson.quizSettings.minimumTimeRequired} minutes on this lesson`
+      }
+    }
+
+    // Get user's previous attempts
+    const attempts = await QuizAttempt.find({
+      quiz: quiz._id,
+      user: userId,
+    }).sort('-createdAt')
+
+    // Check if user has reached the maximum attempts
+    const completedAttempts = attempts.filter((attempt) => attempt.status !== 'inProgress')
+    const canStartNewAttempt = canTakeQuiz && completedAttempts.length < quiz.maxAttempts
+
+    // Check if there are any in-progress attempts
+    const inProgressAttempt = attempts.find((attempt) => attempt.status === 'inProgress')
+    let ongoingAttemptId = null
+
+    if (inProgressAttempt) {
+      // Check if the attempt has expired based on quiz time
+      const timeLimit = quiz.quizTime * 60 * 1000 // Convert to milliseconds
+      const timeSinceStart = new Date() - inProgressAttempt.startTime
+
+      if (timeSinceStart <= timeLimit) {
+        // Still valid, provide the attempt ID
+        ongoingAttemptId = inProgressAttempt._id
+      }
+    }
+
+    // Get progress data for this user and module
+    const progress = await Progress.findOne({
+      user: userId,
+      module: moduleId,
+    })
+
+    // Check if the quiz has been completed
+    const quizCompleted = progress?.completedQuizzes.some((qId) => qId.toString() === quiz._id.toString()) || false
+
+    // Return regular user data with improved diagnostic information
+    res.status(200).json({
+      status: 'success',
+      data: {
+        quiz: {
+          _id: quiz._id,
+          title: quiz.title,
+          quizTime: quiz.quizTime,
+          passingScore: quiz.passingScore,
+          maxAttempts: quiz.maxAttempts,
+          totalMarks: quiz.totalMarks,
+          questionCount: quiz.questions.length,
+          questionPoolSize: quiz.questionPoolSize,
+        },
+        attempts: attempts.map((attempt) => ({
+          _id: attempt._id,
+          score: attempt.score,
+          percentage: attempt.percentage,
+          status: attempt.status,
+          startTime: attempt.startTime,
+          submitTime: attempt.submitTime,
+          passed: attempt.passed,
+        })),
+        canTakeQuiz,
+        canStartNewAttempt,
+        ongoingAttemptId,
+        blockedReason,
+        completedAttemptsCount: completedAttempts.length,
+        quizCompleted,
+        requirements: lesson.quizSettings,
+      },
+    })
+  } catch (error) {
+    next(error)
+  }
+}
+
 exports.startQuiz = async (req, res, next) => {
   const session = await mongoose.startSession()
   session.startTransaction()
@@ -1069,143 +948,6 @@ exports.startQuiz = async (req, res, next) => {
   }
 }
 
-// Submit quiz attempt
-// exports.submitQuiz = async (req, res, next) => {
-//   const session = await mongoose.startSession()
-//   session.startTransaction()
-
-//   try {
-//     const { courseId, moduleId, lessonId, attemptId } = req.params
-//     const { answers } = req.body
-//     const userId = req.user._id
-
-//     // Get attempt and quiz
-//     const attempt = await QuizAttempt.findOne({
-//       _id: attemptId,
-//       user: userId,
-//       status: 'inProgress',
-//     }).session(session)
-
-//     if (!attempt) {
-//       await session.abortTransaction()
-//       return next(new AppError('Quiz attempt not found or already submitted', 404))
-//     }
-
-//     const lesson = await Lesson.findOne({
-//       _id: lessonId,
-//       module: moduleId,
-//       isDeleted: false,
-//     })
-//       .populate({
-//         path: 'quiz',
-//         match: { isDeleted: false },
-//       })
-//       .session(session)
-
-//     if (!lesson || !lesson.quiz) {
-//       await session.abortTransaction()
-//       return next(new AppError('Quiz not found', 404))
-//     }
-
-//     const quiz = lesson.quiz
-
-//     // Check time limit
-//     const timeLimit = quiz.quizTime * 60 * 1000 // Convert to milliseconds
-//     const timeTaken = new Date() - attempt.startTime
-
-//     if (timeTaken > timeLimit) {
-//       await session.abortTransaction()
-//       return next(new AppError('Quiz time limit exceeded', 400))
-//     }
-
-//     // Process answers and calculate score
-//     let totalScore = 0
-//     const processedAnswers = []
-//     let needsManualGrading = false
-
-//     for (const answer of answers) {
-//       const question = quiz.questions.id(answer.questionId)
-//       if (!question) continue
-
-//       const processedAnswer = {
-//         questionId: answer.questionId,
-//         marks: 0,
-//       }
-
-//       if (question.type === 'mcq') {
-//         // Handle MCQ
-//         const correctOption = question.options.find((opt) => opt.isCorrect)
-//         processedAnswer.selectedOption = answer.selectedOption
-//         processedAnswer.isCorrect = correctOption && correctOption.option === answer.selectedOption
-//         processedAnswer.marks = processedAnswer.isCorrect ? question.marks : 0
-//         totalScore += processedAnswer.marks
-//       } else {
-//         // Handle text answer
-//         processedAnswer.textAnswer = answer.textAnswer
-//         needsManualGrading = true
-//       }
-
-//       processedAnswers.push(processedAnswer)
-//     }
-
-//     // Update attempt
-//     attempt.answers = processedAnswers
-//     attempt.submitTime = new Date()
-//     attempt.status = needsManualGrading ? 'submitted' : 'graded'
-
-//     if (!needsManualGrading) {
-//       attempt.score = totalScore
-//       attempt.percentage = (totalScore / quiz.totalMarks) * 100
-//       attempt.passed = attempt.percentage >= quiz.passingScore
-//     }
-
-//     await attempt.save({ session })
-
-//     // If all MCQ and passed, update progress
-//     if (!needsManualGrading && attempt.percentage >= quiz.passingScore) {
-//       let progress = await Progress.findOne({
-//         user: userId,
-//         course: courseId,
-//         module: moduleId,
-//       }).session(session)
-
-//       if (!progress) {
-//         progress = new Progress({
-//           user: userId,
-//           course: courseId,
-//           module: moduleId,
-//           completedLessons: [],
-//           completedQuizzes: [],
-//           progress: 0,
-//           lastAccessed: new Date(),
-//         })
-//       }
-
-//       if (!progress.completedQuizzes.includes(quiz._id)) {
-//         progress.completedQuizzes.push(quiz._id)
-//         await progress.save({ session })
-//       }
-//     }
-
-//     await session.commitTransaction()
-
-//     res.status(200).json({
-//       status: 'success',
-//       data: {
-//         score: attempt.score,
-//         percentage: attempt.percentage,
-//         passed: attempt.passed,
-//         needsManualGrading,
-//         answers: processedAnswers,
-//       },
-//     })
-//   } catch (error) {
-//     await session.abortTransaction()
-//     next(error)
-//   } finally {
-//     session.endSession()
-//   }
-// }
 
 exports.submitQuiz = async (req, res, next) => {
   const session = await mongoose.startSession()

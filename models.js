@@ -299,6 +299,10 @@ const moduleSchema = new mongoose.Schema(
         },
       },
     ],
+    sequentialProgress: {
+      type: Boolean,
+      default: false,
+    },
     isDeleted: {
       type: Boolean,
       default: false,
@@ -325,7 +329,6 @@ moduleSchema.pre('find', function () {
 moduleSchema.pre('findOne', function () {
   this.where({ isDeleted: false })
 })
-
 
 const lessonSchema = new mongoose.Schema(
   {
@@ -514,155 +517,167 @@ const questionSchema = new mongoose.Schema({
   type: {
     type: String,
     enum: ['mcq', 'text'],
-    required: true
+    required: true,
   },
   // For MCQ questions
-  options: [{
-    option: {
-      type: String,
-      required: true
+  options: [
+    {
+      option: {
+        type: String,
+        required: true,
+      },
+      isCorrect: {
+        type: Boolean,
+        required: true,
+      },
     },
-    isCorrect: {
-      type: Boolean,
-      required: true
-    }
-  }],
+  ],
   marks: {
     type: Number,
     required: true,
-    default: 1
-  }
-});
+    default: 1,
+  },
+})
 
 // Quiz Schema
-const quizSchema = new mongoose.Schema({
-  lesson: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Lesson',
-    required: true,
-    index: true
+const quizSchema = new mongoose.Schema(
+  {
+    lesson: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Lesson',
+      required: true,
+      index: true,
+    },
+    title: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    quizTime: {
+      type: Number, // in minutes
+      required: true,
+      min: 1,
+    },
+    passingScore: {
+      type: Number,
+      required: true,
+      min: 0,
+      max: 100,
+      default: 50,
+    },
+    maxAttempts: {
+      type: Number,
+      required: true,
+      default: 3,
+      min: 1,
+    },
+    questionPoolSize: {
+      type: Number,
+      min: 0, // 0 means use all questions
+      default: 0,
+    },
+    questions: [questionSchema],
+    totalMarks: {
+      type: Number,
+      required: true,
+    },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
   },
-  title: {
-    type: String,
-    required: true,
-    trim: true
-  },
-  quizTime: {
-    type: Number, // in minutes
-    required: true,
-    min: 1
-  },
-  passingScore: {
-    type: Number,
-    required: true,
-    min: 0,
-    max: 100,
-    default: 50
-  },
-  maxAttempts: {
-    type: Number,
-    required: true,
-    default: 3,
-    min: 1
-  },
-  questionPoolSize: {
-    type: Number,
-    min: 0, // 0 means use all questions
-    default: 0
-  },
-  questions: [questionSchema],
-  totalMarks: {
-    type: Number,
-    required: true
-  },
-  isDeleted: {
-    type: Boolean,
-    default: false,
-    index: true
+  {
+    timestamps: true,
   }
-}, {
-  timestamps: true
-});
+)
 
 // Calculate total marks before saving
-quizSchema.pre('save', function(next) {
+quizSchema.pre('save', function (next) {
   if (this.isModified('questions')) {
-    this.totalMarks = this.questions.reduce((sum, q) => sum + q.marks, 0);
+    this.totalMarks = this.questions.reduce((sum, q) => sum + q.marks, 0)
   }
-  next();
-});
+  next()
+})
 
 // Quiz Attempt Schema
-const quizAttemptSchema = new mongoose.Schema({
-  quiz: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Quiz',
-    required: true,
-    index: true
-  },
-  user: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true,
-    index: true
-  },
-  startTime: {
-    type: Date,
-    required: true,
-    default: Date.now
-  },
-  submitTime: Date,
-  questionSet: [{
-    type: mongoose.Schema.Types.ObjectId
-  }],
-  answers: [{
-    questionId: {
+const quizAttemptSchema = new mongoose.Schema(
+  {
+    quiz: {
       type: mongoose.Schema.Types.ObjectId,
-      required: true
+      ref: 'Quiz',
+      required: true,
+      index: true,
     },
-    // For MCQ
-    selectedOption: String,
-    // For text questions
-    textAnswer: String,
-    marks: Number,
-    isCorrect: Boolean,
-    feedback: String
-  }],
-  score: Number,
-  percentage: Number,
-  passed: Boolean,
-  status: {
-    type: String,
-    enum: ['inProgress', 'submitted', 'graded'],
-    default: 'inProgress'
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true,
+    },
+    startTime: {
+      type: Date,
+      required: true,
+      default: Date.now,
+    },
+    submitTime: Date,
+    questionSet: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+      },
+    ],
+    answers: [
+      {
+        questionId: {
+          type: mongoose.Schema.Types.ObjectId,
+          required: true,
+        },
+        // For MCQ
+        selectedOption: String,
+        // For text questions
+        textAnswer: String,
+        marks: Number,
+        isCorrect: Boolean,
+        feedback: String,
+      },
+    ],
+    score: Number,
+    percentage: Number,
+    passed: Boolean,
+    status: {
+      type: String,
+      enum: ['inProgress', 'submitted', 'graded'],
+      default: 'inProgress',
+    },
+    attempt: {
+      type: Number,
+      required: true,
+    },
+    gradedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
   },
-  attempt: {
-    type: Number,
-    required: true
-  },
-  gradedBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
+  {
+    timestamps: true,
   }
-}, {
-  timestamps: true
-});
+)
 
 // Index for checking attempt limits
-quizAttemptSchema.index({ quiz: 1, user: 1, attempt: 1 }, { unique: true });
+quizAttemptSchema.index({ quiz: 1, user: 1, attempt: 1 }, { unique: true })
 
 // Virtual for remaining time
-quizAttemptSchema.virtual('remainingTime').get(function() {
-  if (this.status !== 'inProgress' || !this.startTime) return 0;
-  
-  const quiz = this.quiz;
-  if (!quiz?.quizTime) return 0;
-  
-  const endTime = new Date(this.startTime.getTime() + quiz.quizTime * 60000);
-  const remaining = endTime - new Date();
-  
-  return Math.max(0, Math.floor(remaining / 1000)); // Return remaining seconds
-});
+quizAttemptSchema.virtual('remainingTime').get(function () {
+  if (this.status !== 'inProgress' || !this.startTime) return 0
+
+  const quiz = this.quiz
+  if (!quiz?.quizTime) return 0
+
+  const endTime = new Date(this.startTime.getTime() + quiz.quizTime * 60000)
+  const remaining = endTime - new Date()
+
+  return Math.max(0, Math.floor(remaining / 1000)) // Return remaining seconds
+})
 
 const paymentSchema = new mongoose.Schema(
   {
@@ -928,16 +943,16 @@ const lessonProgressSchema = new mongoose.Schema(
     timeSpent: {
       type: Number, // in seconds
       default: 0,
-      min: 0
+      min: 0,
     },
     lastAccessed: {
       type: Date,
       default: Date.now,
-      index: true
-    }
+      index: true,
+    },
   },
-  { 
-    timestamps: true 
+  {
+    timestamps: true,
   }
 )
 
@@ -961,24 +976,24 @@ const videoProgressSchema = new mongoose.Schema(
     watchedTime: {
       type: Number, // in seconds
       default: 0,
-      min: 0
+      min: 0,
     },
     lastPosition: {
       type: Number, // in seconds
       default: 0,
-      min: 0
+      min: 0,
     },
     completed: {
       type: Boolean,
-      default: false
+      default: false,
     },
     lastAccessed: {
       type: Date,
-      default: Date.now
-    }
+      default: Date.now,
+    },
   },
-  { 
-    timestamps: true 
+  {
+    timestamps: true,
   }
 )
 
@@ -1007,19 +1022,19 @@ const assetProgressSchema = new mongoose.Schema(
     downloadCount: {
       type: Number,
       default: 0,
-      min: 0
+      min: 0,
     },
     firstDownloaded: {
       type: Date,
-      default: Date.now
+      default: Date.now,
     },
     lastDownloaded: {
       type: Date,
-      default: Date.now
-    }
+      default: Date.now,
+    },
   },
-  { 
-    timestamps: true 
+  {
+    timestamps: true,
   }
 )
 
@@ -1037,9 +1052,9 @@ module.exports = {
   Discount: mongoose.model('Discount', discountSchema),
   Progress: mongoose.model('Progress', progressSchema),
   Review: mongoose.model('Review', reviewSchema),
-  LessonProgress : mongoose.model('LessonProgress', lessonProgressSchema),
-  VideoProgress : mongoose.model('VideoProgress', videoProgressSchema),
-  AssetProgress : mongoose.model('AssetProgress', assetProgressSchema)
+  LessonProgress: mongoose.model('LessonProgress', lessonProgressSchema),
+  VideoProgress: mongoose.model('VideoProgress', videoProgressSchema),
+  AssetProgress: mongoose.model('AssetProgress', assetProgressSchema),
 }
 
 /*
