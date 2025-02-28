@@ -699,6 +699,7 @@ exports.getQuiz = async (req, res, next) => {
 }
 
 // Start a new quiz attempt
+
 // exports.startQuiz = async (req, res, next) => {
 //   const session = await mongoose.startSession()
 //   session.startTransaction()
@@ -746,30 +747,31 @@ exports.getQuiz = async (req, res, next) => {
 
 //     const quiz = lesson.quiz
 
-//     // Check requirements
-//     let canTakeQuiz = true
+//     // // Check requirements
+//     // let canTakeQuiz = true
 
-//     // Time requirement check
-//     if (lesson.quizSettings?.minimumTimeRequired > 0) {
-//       const timeProgress = await LessonProgress.findOne({
-//         user: userId,
-//         lesson: lessonId,
-//       }).session(session)
+//     // // Lesson video view or engagement Time requirement check
+//     // if (lesson.quizSettings?.minimumTimeRequired > 0) {
+//     //   const timeProgress = await LessonProgress.findOne({
+//     //     user: userId,
+//     //     lesson: lessonId,
+//     //   }).session(session)
 
-//       if (!timeProgress || timeProgress.timeSpent < lesson.quizSettings.minimumTimeRequired * 60) {
-//         canTakeQuiz = false
-//       }
-//     }
+//     //   if (!timeProgress || timeProgress.timeSpent < lesson.quizSettings.minimumTimeRequired * 60) {
+//     //     canTakeQuiz = false
+//     //   }
+//     // }
 
-//     if (!canTakeQuiz) {
-//       await session.abortTransaction()
-//       return next(new AppError('Quiz requirements not met', 403))
-//     }
+//     // if (!canTakeQuiz) {
+//     //   await session.abortTransaction()
+//     //   return next(new AppError('Quiz requirements not met', 403))
+//     // }
 
 //     // Check attempts limit
 //     const attemptCount = await QuizAttempt.countDocuments({
 //       quiz: quiz._id,
 //       user: userId,
+//       status: { $ne: 'inProgress' }, // Only count completed/graded attempts
 //     }).session(session)
 
 //     if (attemptCount >= quiz.maxAttempts) {
@@ -777,7 +779,7 @@ exports.getQuiz = async (req, res, next) => {
 //       return next(new AppError('Maximum attempts reached', 400))
 //     }
 
-//     // Check for ongoing attempt
+//     // Check for ongoing attempt and handle expired attempts
 //     const ongoingAttempt = await QuizAttempt.findOne({
 //       quiz: quiz._id,
 //       user: userId,
@@ -785,26 +787,60 @@ exports.getQuiz = async (req, res, next) => {
 //     }).session(session)
 
 //     if (ongoingAttempt) {
-//       await session.abortTransaction()
-//       return next(new AppError('You have an ongoing quiz attempt', 400))
+//       // Calculate if the attempt has expired based on quiz time
+//       const timeLimit = quiz.quizTime * 60 * 1000 // Convert to milliseconds
+//       const timeSinceStart = new Date() - ongoingAttempt.startTime
+
+//       if (timeSinceStart > timeLimit) {
+//         // The attempt has expired, so mark it as such
+//         ongoingAttempt.status = 'submitted'
+//         ongoingAttempt.submitTime = new Date(ongoingAttempt.startTime.getTime() + timeLimit)
+//         ongoingAttempt.score = 0 // No score for expired/unsubmitted
+//         ongoingAttempt.percentage = 0
+//         ongoingAttempt.passed = false
+
+//         // Save any answers that might have been recorded
+//         await ongoingAttempt.save({ session })
+//       } else {
+//         // The attempt is still valid within the time window
+//         await session.abortTransaction()
+//         return next(new AppError('You have an ongoing quiz attempt', 400))
+//       }
 //     }
 
-//     // Create new attempt
+//     // Determine question set based on questionPoolSize
+//     let questionSet = [...quiz.questions]
+//     let selectedQuestionIds = []
+
+//     // If questionPoolSize is set and less than total questions, select random subset
+//     if (quiz.questionPoolSize > 0 && quiz.questionPoolSize < quiz.questions.length) {
+//       // Shuffle questions array
+//       questionSet = quiz.questions
+//         .map((q) => ({ q, sort: Math.random() }))
+//         .sort((a, b) => a.sort - b.sort)
+//         .map(({ q }) => q)
+//         .slice(0, quiz.questionPoolSize)
+//     }
+
+//     // Extract just the question IDs for storing in the attempt
+//     selectedQuestionIds = questionSet.map((q) => q._id)
+
+//     // Create new attempt with the selected question set
 //     const attempt = await QuizAttempt.create(
 //       [
 //         {
 //           quiz: quiz._id,
 //           user: userId,
 //           attempt: attemptCount + 1,
-//           attempt: 1,
 //           startTime: new Date(),
+//           questionSet: selectedQuestionIds,
 //         },
 //       ],
 //       { session }
 //     )
 
 //     // Prepare questions (remove correct answers for MCQs)
-//     const questions = quiz.questions.map((q) => ({
+//     const questions = questionSet.map((q) => ({
 //       _id: q._id,
 //       question: q.question,
 //       type: q.type,
@@ -820,12 +856,16 @@ exports.getQuiz = async (req, res, next) => {
 
 //     await session.commitTransaction()
 
+//     // Calculate total marks for the selected questions
+//     const attemptTotalMarks = questionSet.reduce((sum, q) => sum + q.marks, 0)
+
 //     res.status(200).json({
 //       status: 'success',
-//       message: 'Quiz attempt started',
 //       data: {
 //         attemptId: attempt[0]._id,
 //         questions,
+//         questionCount: questions.length,
+//         totalMarks: attemptTotalMarks,
 //         quizTime: quiz.quizTime,
 //         startTime: attempt[0].startTime,
 //       },
@@ -838,6 +878,7 @@ exports.getQuiz = async (req, res, next) => {
 //   }
 // }
 
+// Start a new quiz attempt with improved error handling
 exports.startQuiz = async (req, res, next) => {
   const session = await mongoose.startSession()
   session.startTransaction()
@@ -885,66 +926,78 @@ exports.startQuiz = async (req, res, next) => {
 
     const quiz = lesson.quiz
 
-    // // Check requirements
-    // let canTakeQuiz = true
+    // Skip all checks for admin users
+    if (!isAdmin) {
+      // Time requirement check - only if it's actually set (greater than 0)
+      if (lesson.quizSettings?.minimumTimeRequired > 0) {
+        const timeProgress = await LessonProgress.findOne({
+          user: userId,
+          lesson: lessonId,
+        }).session(session)
 
-    // // Lesson video view or engagement Time requirement check
-    // if (lesson.quizSettings?.minimumTimeRequired > 0) {
-    //   const timeProgress = await LessonProgress.findOne({
-    //     user: userId,
-    //     lesson: lessonId,
-    //   }).session(session)
-
-    //   if (!timeProgress || timeProgress.timeSpent < lesson.quizSettings.minimumTimeRequired * 60) {
-    //     canTakeQuiz = false
-    //   }
-    // }
-
-    // if (!canTakeQuiz) {
-    //   await session.abortTransaction()
-    //   return next(new AppError('Quiz requirements not met', 403))
-    // }
-
-    // Check attempts limit
-    const attemptCount = await QuizAttempt.countDocuments({
-      quiz: quiz._id,
-      user: userId,
-      status: { $ne: 'inProgress' }, // Only count completed/graded attempts
-    }).session(session)
-
-    if (attemptCount >= quiz.maxAttempts) {
-      await session.abortTransaction()
-      return next(new AppError('Maximum attempts reached', 400))
+        if (!timeProgress || timeProgress.timeSpent < lesson.quizSettings.minimumTimeRequired * 60) {
+          await session.abortTransaction()
+          return next(new AppError(`You need to spend at least ${lesson.quizSettings.minimumTimeRequired} minutes on this lesson before taking the quiz`, 403))
+        }
+      }
     }
 
-    // Check for ongoing attempt and handle expired attempts
-    const ongoingAttempt = await QuizAttempt.findOne({
+    // Get all attempts including inProgress ones
+    const allAttempts = await QuizAttempt.find({
       quiz: quiz._id,
       user: userId,
-      status: 'inProgress',
-    }).session(session)
+    })
+      .sort('-createdAt')
+      .session(session)
 
-    if (ongoingAttempt) {
-      // Calculate if the attempt has expired based on quiz time
+    // Split attempts by status
+    const inProgressAttempts = allAttempts.filter((attempt) => attempt.status === 'inProgress')
+    const completedAttempts = allAttempts.filter((attempt) => attempt.status !== 'inProgress')
+
+    // Check if max attempts reached - skip for admin users
+    if (!isAdmin && completedAttempts.length >= quiz.maxAttempts) {
+      await session.abortTransaction()
+      return next(new AppError(`Maximum attempts (${quiz.maxAttempts}) reached`, 400))
+    }
+
+    // Step 1: Process expired attempts - mark them as submitted with zero score
+    for (const attempt of inProgressAttempts) {
       const timeLimit = quiz.quizTime * 60 * 1000 // Convert to milliseconds
-      const timeSinceStart = new Date() - ongoingAttempt.startTime
+      const timeSinceStart = new Date() - attempt.startTime
 
       if (timeSinceStart > timeLimit) {
-        // The attempt has expired, so mark it as such
-        ongoingAttempt.status = 'submitted'
-        ongoingAttempt.submitTime = new Date(ongoingAttempt.startTime.getTime() + timeLimit)
-        ongoingAttempt.score = 0 // No score for expired/unsubmitted
-        ongoingAttempt.percentage = 0
-        ongoingAttempt.passed = false
-
-        // Save any answers that might have been recorded
-        await ongoingAttempt.save({ session })
+        // This attempt has expired, mark it as submitted with zero score
+        attempt.status = 'submitted'
+        attempt.submitTime = new Date(attempt.startTime.getTime() + timeLimit)
+        attempt.score = 0
+        attempt.percentage = 0
+        attempt.passed = false
+        await attempt.save({ session })
       } else {
-        // The attempt is still valid within the time window
+        // Still valid attempt within time window
         await session.abortTransaction()
         return next(new AppError('You have an ongoing quiz attempt', 400))
       }
     }
+
+    // Step 2: At this point all in-progress attempts are either expired (and marked as submitted)
+    // or we've returned an error for valid in-progress attempts
+
+    // Step 3: Find highest attempt number across all attempts (both completed and previously in-progress)
+    // Re-query to get the updated status of attempts after marking expired ones
+    const updatedAttempts = await QuizAttempt.find({
+      quiz: quiz._id,
+      user: userId,
+    }).session(session)
+
+    // Find the highest attempt number
+    let highestAttemptNumber = 0
+    if (updatedAttempts.length > 0) {
+      highestAttemptNumber = Math.max(...updatedAttempts.map((a) => a.attempt))
+    }
+
+    // Use next available attempt number
+    const nextAttemptNumber = highestAttemptNumber + 1
 
     // Determine question set based on questionPoolSize
     let questionSet = [...quiz.questions]
@@ -969,7 +1022,7 @@ exports.startQuiz = async (req, res, next) => {
         {
           quiz: quiz._id,
           user: userId,
-          attempt: attemptCount + 1,
+          attempt: nextAttemptNumber,
           startTime: new Date(),
           questionSet: selectedQuestionIds,
         },
