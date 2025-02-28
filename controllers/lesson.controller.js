@@ -750,6 +750,112 @@ exports.getLessons = async (req, res, next) => {
 }
 
 
+// exports.getLesson = async (req, res, next) => {
+//   try {
+//     const { courseId, moduleId, lessonId } = req.params
+//     const userId = req.user._id
+
+//     const user = await User.findById(userId).select('+role +enrolledCourses').lean()
+//     if (!user) {
+//       return next(new AppError('User not found', 404))
+//     }
+
+//     const isAdmin = ['admin', 'subAdmin', 'moderator'].includes(user.role)
+
+//     if (!isAdmin) {
+//       const enrolledCourse = user.enrolledCourses?.find((ec) => ec.course.toString() === courseId)
+//       if (!enrolledCourse) {
+//         return next(new AppError('You do not have access to this course', 403))
+//       }
+//       const hasAccess = enrolledCourse.enrollmentType === 'full' || enrolledCourse.enrolledModules.some((em) => em.module.toString() === moduleId)
+//       if (!hasAccess) {
+//         return next(new AppError('You do not have access to this module', 403))
+//       }
+//     }
+
+//     const lesson = await Lesson.findOne({ _id: lessonId, module: moduleId, isDeleted: false }).populate('quiz').lean()
+//     if (!lesson) {
+//       return next(new AppError('Lesson not found', 404))
+//     }
+
+//     const progress = await Progress.findOne({ user: userId, module: moduleId }).lean()
+//     const previousLesson = await Lesson.findOne({ module: moduleId, order: lesson.order - 1, isDeleted: false })
+//       .populate('quiz')
+//       .lean()
+
+//     if (!isAdmin && previousLesson?.quiz && previousLesson.quizSettings.blockProgress) {
+//       const isPreviousQuizCompleted = progress?.completedQuizzes.includes(previousLesson.quiz._id.toString())
+//       if (!isPreviousQuizCompleted) {
+//         return next(new AppError('Access denied - complete previous quiz first', 403))
+//       }
+//     }
+
+//     const responseData = {
+//       _id: lesson._id,
+//       title: lesson.title,
+//       description: lesson.description,
+//       details: lesson.details,
+//       module: lesson.module,
+//       order: lesson.order,
+//       videoUrl: lesson.videoUrl,
+//       dashUrl: lesson.dashUrl,
+//       rawUrl: lesson.rawUrl,
+//       cloudflareVideoId: lesson.cloudflareVideoId,
+//       duration: lesson.duration,
+//       thumbnail: lesson.thumbnail,
+//       videoMeta: lesson.videoMeta,
+//       assets: lesson.assets?.map((asset) => ({
+//         _id: asset._id,
+//         title: asset.title,
+//         description: asset.description,
+//         fileUrl: asset.fileUrl,
+//         fileType: asset.fileType,
+//         fileSize: asset.fileSize,
+//         downloadCount: asset.downloadCount,
+//         uploadedAt: asset.uploadedAt,
+//       })),
+//       quizSettings: lesson.quizSettings,
+//       completionRequirements: lesson.completionRequirements,
+//     }
+
+//     if (!isAdmin) {
+//       responseData.progress = {
+//         completed: progress?.completedLessons?.some((id) => id.toString() === lessonId) || false,
+//         timeSpent: 0,
+//         videoProgress: null,
+//         assetDownloads: {},
+//       }
+
+//       if (lesson.quiz) {
+//         const quizAttempts = await QuizAttempt.find({ quiz: lesson.quiz._id, user: userId }).sort('-submittedAt').lean()
+//         const isQuizCompleted = progress?.completedQuizzes?.some((quizId) => quizId.toString() === lesson.quiz._id.toString()) || false
+
+//         responseData.progress.quiz = {
+//           completed: isQuizCompleted,
+//           attempts: quizAttempts.map((attempt) => ({
+//             id: attempt._id,
+//             score: attempt.score,
+//             percentage: attempt.percentage,
+//             passed: attempt.passed,
+//             status: attempt.status,
+//             submittedAt: attempt.submittedAt,
+//           })),
+//           canTake: !isQuizCompleted,
+//           remainingAttempts: Math.max(lesson.quiz.maxAttempts - quizAttempts.length, 0),
+//         }
+//       }
+//     }
+
+//     res.status(200).json({
+//       status: 'success',
+//       message: 'Lesson retrieved successfully',
+//       data: responseData,
+//     })
+//   } catch (error) {
+//     next(error)
+//   }
+// }
+
 exports.getLesson = async (req, res, next) => {
   try {
     const { courseId, moduleId, lessonId } = req.params
@@ -783,8 +889,9 @@ exports.getLesson = async (req, res, next) => {
       .populate('quiz')
       .lean()
 
-    if (!isAdmin && previousLesson?.quiz && previousLesson.quizSettings.blockProgress) {
-      const isPreviousQuizCompleted = progress?.completedQuizzes.includes(previousLesson.quiz._id.toString())
+    // Corrected prerequisite check:
+    if (!isAdmin && previousLesson?.quiz && previousLesson.quizSettings?.blockProgress) {
+      const isPreviousQuizCompleted = progress && progress.completedQuizzes.some((quizId) => quizId.toString() === previousLesson.quiz._id.toString())
       if (!isPreviousQuizCompleted) {
         return next(new AppError('Access denied - complete previous quiz first', 403))
       }
@@ -832,13 +939,13 @@ exports.getLesson = async (req, res, next) => {
 
         responseData.progress.quiz = {
           completed: isQuizCompleted,
-          attempts: quizAttempts.map((attempt) => ({
-            id: attempt._id,
-            score: attempt.score,
-            percentage: attempt.percentage,
-            passed: attempt.passed,
-            status: attempt.status,
-            submittedAt: attempt.submittedAt,
+          attempts: quizAttempts.map((attempt) => ({ //Removed attempts
+           id: attempt._id,
+           score: attempt.score,
+           percentage: attempt.percentage,
+           passed: attempt.passed,
+           status: attempt.status,
+           submittedAt: attempt.submittedAt,
           })),
           canTake: !isQuizCompleted,
           remainingAttempts: Math.max(lesson.quiz.maxAttempts - quizAttempts.length, 0),
