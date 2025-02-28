@@ -204,32 +204,55 @@ async function checkQuizRequirements(userId, lessonId) {
   }
 }
 
+// async function validateQuizCompletion(userId, lessonId) {
+//   try {
+//     const lesson = await Lesson.findById(lessonId).populate('quiz')
+//     if (!lesson || !lesson.quiz) return true
+
+//     const attempts = await QuizAttempt.find({
+//       quiz: lesson.quiz._id,
+//       user: userId,
+//       status: { $in: ['completed', 'grading'] },
+//     }).sort('-submittedAt')
+
+//     if (!attempts.length) return false
+
+//     const latestAttempt = attempts[0]
+
+//     // If attempt is still being graded
+//     if (latestAttempt.status === 'grading' || !latestAttempt.gradingComplete) {
+//       return false
+//     }
+
+//     // Check if passing score was achieved
+//     const requiredScore = lesson.quizSettings?.minimumPassingScore || lesson.quiz.passingScore
+//     return latestAttempt.percentage >= requiredScore
+//   } catch (error) {
+//     console.error('Error validating quiz completion:', error)
+//     return false
+//   }
+// }
+
 async function validateQuizCompletion(userId, lessonId) {
   try {
     const lesson = await Lesson.findById(lessonId).populate('quiz')
-    if (!lesson || !lesson.quiz) return true
+    if (!lesson || !lesson.quiz) return true // No quiz, so requirements are met
 
     const attempts = await QuizAttempt.find({
       quiz: lesson.quiz._id,
       user: userId,
-      status: { $in: ['completed', 'grading'] },
-    }).sort('-submittedAt')
+      status: 'graded', // Only check graded attempts
+    }).lean() // .lean() is good for performance here
 
-    if (!attempts.length) return false
+    if (!attempts.length) return false // No graded attempts
 
-    const latestAttempt = attempts[0]
+    // Check if ANY attempt passed
+    const hasPassedAttempt = attempts.some((attempt) => attempt.passed)
 
-    // If attempt is still being graded
-    if (latestAttempt.status === 'grading' || !latestAttempt.gradingComplete) {
-      return false
-    }
-
-    // Check if passing score was achieved
-    const requiredScore = lesson.quizSettings?.minimumPassingScore || lesson.quiz.passingScore
-    return latestAttempt.percentage >= requiredScore
+    return hasPassedAttempt
   } catch (error) {
     console.error('Error validating quiz completion:', error)
-    return false
+    return false // Fail gracefully
   }
 }
 
@@ -1085,8 +1108,11 @@ exports.getLesson = async (req, res, next) => {
             .lean(),
         ])
 
+        const isQuizCompleted = progress?.completedQuizzes?.some((quizId) => quizId.toString() === lesson.quiz._id.toString()) || false
+
+
         responseData.progress.quiz = {
-          completed: progress?.completedQuizzes.includes(lesson.quiz._id) || false,
+          completed: isQuizCompleted,
           attempts: quizAttempts.map((attempt) => ({
             id: attempt._id,
             score: attempt.score,
