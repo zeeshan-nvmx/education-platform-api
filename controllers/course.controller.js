@@ -318,6 +318,7 @@ exports.getPublicCoursesList = async (req, res, next) => {
     const query = {} 
 
     if (req.query.category) query.category = req.query.category
+    if (req.query.featured) query.featured = req.query.featured === 'true'
     if (req.query.search) {
       query.$or = [{ title: new RegExp(req.query.search, 'i') }, { description: new RegExp(req.query.search, 'i') }]
     }
