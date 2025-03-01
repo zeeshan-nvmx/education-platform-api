@@ -1,6 +1,45 @@
 const mongoose = require('mongoose')
-const { Course, Module, User, Lesson, Progress } = require('../models')
+const { Course, Module, User, Lesson, Progress, Certificate } = require('../models')
 const { AppError } = require('../utils/errors')
+const crypto = require('crypto')
+
+// Generate a short, unique certificate ID (max 10 chars, uppercase)
+function generateCertificateId(type) {
+  // Use 'C' prefix for course, 'M' for module
+  const prefix = type === 'course' ? 'C' : 'M'
+
+  // Generate random bytes and convert to base36 string
+  const randomBytes = crypto.randomBytes(4).toString('hex').toUpperCase().substring(0, 8)
+
+  // Combine prefix and random string, ensuring total length ≤ 10
+  return `${prefix}${randomBytes}`.substring(0, 10)
+}
+
+// Verify if a certificate ID exists
+exports.verifyCertificate = async (req, res, next) => {
+  try {
+    const { certificateId } = req.params
+
+    // Find certificate in database
+    const certificate = await Certificate.findOne({
+      certificateId: certificateId.toUpperCase(),
+      isRevoked: false,
+    })
+
+    if (!certificate) {
+      return next(new AppError('Certificate not found or has been revoked', 404))
+    }
+
+    // Return certificate data
+    res.status(200).json({
+      status: 'success',
+      message: 'Certificate verified successfully',
+      data: certificate,
+    })
+  } catch (error) {
+    next(error)
+  }
+}
 
 // Get certificate data for a completed course
 exports.getCourseCertificate = async (req, res, next) => {
@@ -9,15 +48,38 @@ exports.getCourseCertificate = async (req, res, next) => {
     const userId = req.user._id
 
     const certificateData = await getCourseCompletionData(userId, courseId)
-    
+
     if (!certificateData.isCompleted) {
       return next(new AppError('Course not yet completed. All modules must be completed to generate a certificate.', 400))
     }
-    
+
+    // Generate a certificate ID
+    const certificateId = generateCertificateId('course')
+    certificateData.certificateId = certificateId
+
+    // Save certificate to database
+    const certificate = await Certificate.create({
+      certificateId,
+      certificateType: 'course',
+      user: userId,
+      course: courseId,
+      courseTitle: certificateData.courseTitle,
+      studentName: certificateData.studentName,
+      completionDate: certificateData.completionDate,
+      issueDate: new Date(),
+      metadata: {
+        category: certificateData.category,
+        totalModules: certificateData.totalModules,
+        completedModules: certificateData.completedModules,
+        instructors: certificateData.instructors,
+        creatorName: certificateData.creatorName,
+      },
+    })
+
     res.status(200).json({
       status: 'success',
       message: 'Certificate data generated successfully',
-      data: certificateData
+      data: certificateData,
     })
   } catch (error) {
     next(error)
@@ -31,15 +93,41 @@ exports.getModuleCertificate = async (req, res, next) => {
     const userId = req.user._id
 
     const certificateData = await getModuleCompletionData(userId, courseId, moduleId)
-    
+
     if (!certificateData.isCompleted) {
       return next(new AppError('Module not yet completed. All lessons must be completed to generate a certificate.', 400))
     }
-    
+
+    // Generate a certificate ID
+    const certificateId = generateCertificateId('module')
+    certificateData.certificateId = certificateId
+
+    // Save certificate to database
+    const certificate = await Certificate.create({
+      certificateId,
+      certificateType: 'module',
+      user: userId,
+      course: courseId,
+      module: moduleId,
+      courseTitle: certificateData.courseTitle,
+      moduleTitle: certificateData.moduleTitle,
+      studentName: certificateData.studentName,
+      completionDate: certificateData.completionDate,
+      issueDate: new Date(),
+      metadata: {
+        category: certificateData.category,
+        totalLessons: certificateData.totalLessons,
+        completedLessons: certificateData.completedLessons,
+        progress: certificateData.progress,
+        instructors: certificateData.instructors,
+        creatorName: certificateData.creatorName,
+      },
+    })
+
     res.status(200).json({
       status: 'success',
       message: 'Certificate data generated successfully',
-      data: certificateData
+      data: certificateData,
     })
   } catch (error) {
     next(error)
@@ -54,7 +142,7 @@ async function getCourseCompletionData(userId, courseId) {
     .populate({
       path: 'modules',
       match: { isDeleted: false },
-      select: '_id'
+      select: '_id',
     })
 
   if (!course) {
@@ -67,9 +155,7 @@ async function getCourseCompletionData(userId, courseId) {
     throw new AppError('User not found', 404)
   }
 
-  const enrollment = user.enrolledCourses.find(
-    (ec) => ec.course && ec.course.toString() === courseId
-  )
+  const enrollment = user.enrolledCourses.find((ec) => ec.course && ec.course.toString() === courseId)
 
   if (!enrollment) {
     throw new AppError('Not enrolled in this course', 403)
@@ -81,26 +167,23 @@ async function getCourseCompletionData(userId, courseId) {
   }
 
   // Get progress for all modules in this course
-  const allModuleIds = course.modules.map(m => m._id)
-  
+  const allModuleIds = course.modules.map((m) => m._id)
+
   const progressRecords = await Progress.find({
     user: userId,
     course: courseId,
-    module: { $in: allModuleIds }
+    module: { $in: allModuleIds },
   })
 
   // Check if all modules are completed
-  const completedModules = progressRecords.filter(p => p.progress === 100)
-  const isCompleted = allModuleIds.length > 0 && 
-    completedModules.length === allModuleIds.length
+  const completedModules = progressRecords.filter((p) => p.progress === 100)
+  const isCompleted = allModuleIds.length > 0 && completedModules.length === allModuleIds.length
 
   // Get completion date (date of last module completion)
   let completionDate = null
   if (isCompleted && progressRecords.length > 0) {
     // Find the most recent update among all modules
-    completionDate = new Date(Math.max(
-      ...progressRecords.map(p => p.updatedAt.getTime())
-    ))
+    completionDate = new Date(Math.max(...progressRecords.map((p) => p.updatedAt.getTime())))
   }
 
   return {
@@ -108,14 +191,14 @@ async function getCourseCompletionData(userId, courseId) {
     certificateType: 'course',
     courseTitle: course.title,
     studentName: `${user.firstName} ${user.lastName}`,
-    instructors: course.instructors.map(i => i.name),
+    instructors: course.instructors.map((i) => i.name),
     creatorName: course.creator ? `${course.creator.firstName} ${course.creator.lastName}` : 'Unknown',
     completionDate,
     courseId: course._id,
     category: course.category,
     totalModules: allModuleIds.length,
     completedModules: completedModules.length,
-    issueDate: new Date()
+    issueDate: new Date(),
   }
 }
 
@@ -125,7 +208,7 @@ async function getModuleCompletionData(userId, courseId, moduleId) {
   const module = await Module.findOne({
     _id: moduleId,
     course: courseId,
-    isDeleted: false
+    isDeleted: false,
   })
 
   if (!module) {
@@ -135,12 +218,11 @@ async function getModuleCompletionData(userId, courseId, moduleId) {
   // Get lesson count for this module
   const totalLessons = await Lesson.countDocuments({
     module: moduleId,
-    isDeleted: false
+    isDeleted: false,
   })
 
   // Get the course details for additional info
-  const course = await Course.findById(courseId)
-    .populate('creator', 'firstName lastName')
+  const course = await Course.findById(courseId).populate('creator', 'firstName lastName')
 
   if (!course) {
     throw new AppError('Course not found', 404)
@@ -152,17 +234,14 @@ async function getModuleCompletionData(userId, courseId, moduleId) {
     throw new AppError('User not found', 404)
   }
 
-  const enrollment = user.enrolledCourses.find(
-    (ec) => ec.course && ec.course.toString() === courseId
-  )
+  const enrollment = user.enrolledCourses.find((ec) => ec.course && ec.course.toString() === courseId)
 
   if (!enrollment) {
     throw new AppError('Not enrolled in this course', 403)
   }
 
   // Check module enrollment
-  const hasModuleAccess = enrollment.enrollmentType === 'full' || 
-    enrollment.enrolledModules.some(em => em.module && em.module.toString() === moduleId)
+  const hasModuleAccess = enrollment.enrollmentType === 'full' || enrollment.enrolledModules.some((em) => em.module && em.module.toString() === moduleId)
 
   if (!hasModuleAccess) {
     throw new AppError('Not enrolled in this module', 403)
@@ -172,7 +251,7 @@ async function getModuleCompletionData(userId, courseId, moduleId) {
   const progress = await Progress.findOne({
     user: userId,
     course: courseId,
-    module: moduleId
+    module: moduleId,
   })
 
   if (!progress) {
@@ -180,7 +259,7 @@ async function getModuleCompletionData(userId, courseId, moduleId) {
       isCompleted: false,
       moduleTitle: module.title,
       courseTitle: course.title,
-      studentName: `${user.firstName} ${user.lastName}`
+      studentName: `${user.firstName} ${user.lastName}`,
     }
   }
 
@@ -193,7 +272,7 @@ async function getModuleCompletionData(userId, courseId, moduleId) {
     moduleTitle: module.title,
     courseTitle: course.title,
     studentName: `${user.firstName} ${user.lastName}`,
-    instructors: course.instructors.map(i => i.name),
+    instructors: course.instructors.map((i) => i.name),
     creatorName: course.creator ? `${course.creator.firstName} ${course.creator.lastName}` : 'Unknown',
     completionDate: progress.updatedAt,
     courseId: course._id,
@@ -202,10 +281,9 @@ async function getModuleCompletionData(userId, courseId, moduleId) {
     totalLessons,
     completedLessons: progress.completedLessons.length,
     progress: progress.progress,
-    issueDate: new Date()
+    issueDate: new Date(),
   }
 }
-
 
 // Mock certificate for a course (no completion validation)
 exports.getMockCourseCertificate = async (req, res, next) => {
@@ -232,6 +310,9 @@ exports.getMockCourseCertificate = async (req, res, next) => {
       return next(new AppError('User not found', 404))
     }
 
+    // Generate certificate ID
+    const certificateId = generateCertificateId('course')
+
     // Generate mock certificate data
     const certificateData = {
       isCompleted: true, // Always true for mock
@@ -246,8 +327,28 @@ exports.getMockCourseCertificate = async (req, res, next) => {
       totalModules: course.modules.length,
       completedModules: course.modules.length, // All modules marked as completed
       issueDate: new Date(),
-      certificateId: generateMockCertificateId(courseId, userId, 'course'),
+      certificateId,
     }
+
+    // Save mock certificate to database
+    const certificate = await Certificate.create({
+      certificateId,
+      certificateType: 'course',
+      user: userId,
+      course: courseId,
+      courseTitle: certificateData.courseTitle,
+      studentName: certificateData.studentName,
+      completionDate: certificateData.completionDate,
+      issueDate: new Date(),
+      metadata: {
+        isMock: true,
+        category: certificateData.category,
+        totalModules: certificateData.totalModules,
+        completedModules: certificateData.completedModules,
+        instructors: certificateData.instructors,
+        creatorName: certificateData.creatorName,
+      },
+    })
 
     res.status(200).json({
       status: 'success',
@@ -295,6 +396,9 @@ exports.getMockModuleCertificate = async (req, res, next) => {
       return next(new AppError('User not found', 404))
     }
 
+    // Generate certificate ID
+    const certificateId = generateCertificateId('module')
+
     // Generate mock certificate data
     const certificateData = {
       isCompleted: true, // Always true for mock
@@ -312,8 +416,31 @@ exports.getMockModuleCertificate = async (req, res, next) => {
       completedLessons: totalLessons, // All lessons marked as completed
       progress: 100, // 100% progress
       issueDate: new Date(),
-      certificateId: generateMockCertificateId(moduleId, userId, 'module'),
+      certificateId,
     }
+
+    // Save mock certificate to database
+    const certificate = await Certificate.create({
+      certificateId,
+      certificateType: 'module',
+      user: userId,
+      course: courseId,
+      module: moduleId,
+      courseTitle: certificateData.courseTitle,
+      moduleTitle: certificateData.moduleTitle,
+      studentName: certificateData.studentName,
+      completionDate: certificateData.completionDate,
+      issueDate: new Date(),
+      metadata: {
+        isMock: true,
+        category: certificateData.category,
+        totalLessons: certificateData.totalLessons,
+        completedLessons: certificateData.completedLessons,
+        progress: certificateData.progress,
+        instructors: certificateData.instructors,
+        creatorName: certificateData.creatorName,
+      },
+    })
 
     res.status(200).json({
       status: 'success',
@@ -323,14 +450,4 @@ exports.getMockModuleCertificate = async (req, res, next) => {
   } catch (error) {
     next(error)
   }
-}
-
-// Helper function to generate a mock certificate ID
-function generateMockCertificateId(itemId, userId, type) {
-  const timestamp = Date.now().toString(36).toUpperCase()
-  const typePrefix = type === 'course' ? 'C' : 'M'
-  const userIdShort = userId.toString().slice(-6)
-  const itemIdShort = itemId.toString().slice(-6)
-
-  return `${typePrefix}-${timestamp}-${userIdShort}-${itemIdShort}`
 }

@@ -870,6 +870,75 @@ const progressSchema = new mongoose.Schema(
 
 progressSchema.index({ user: 1, course: 1, module: 1 }, { unique: true })
 
+const certificateSchema = new mongoose.Schema(
+  {
+    certificateId: {
+      type: String,
+      required: true,
+      unique: true,
+      uppercase: true,
+      trim: true,
+      maxlength: 10,
+    },
+    certificateType: {
+      type: String,
+      enum: ['course', 'module'],
+      required: true,
+    },
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+    },
+    course: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Course',
+      required: true,
+    },
+    module: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Module',
+      required: false,
+    },
+    courseTitle: {
+      type: String,
+      required: true,
+    },
+    moduleTitle: {
+      type: String,
+      required: function () {
+        return this.certificateType === 'module'
+      },
+    },
+    studentName: {
+      type: String,
+      required: true,
+    },
+    completionDate: {
+      type: Date,
+      required: true,
+    },
+    issueDate: {
+      type: Date,
+      required: true,
+      default: Date.now,
+    },
+    // Additional metadata to store with certificate
+    metadata: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
+    isRevoked: {
+      type: Boolean,
+      default: false,
+    },
+  },
+  {
+    timestamps: true,
+  }
+)
+
+
 const reviewSchema = new mongoose.Schema(
   {
     user: {
@@ -1052,6 +1121,7 @@ module.exports = {
   Discount: mongoose.model('Discount', discountSchema),
   Progress: mongoose.model('Progress', progressSchema),
   Review: mongoose.model('Review', reviewSchema),
+  Certificate: mongoose.model('Certificate', certificateSchema),
   LessonProgress: mongoose.model('LessonProgress', lessonProgressSchema),
   VideoProgress: mongoose.model('VideoProgress', videoProgressSchema),
   AssetProgress: mongoose.model('AssetProgress', assetProgressSchema),

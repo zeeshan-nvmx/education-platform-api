@@ -2,9 +2,18 @@ const express = require('express')
 const { protect, restrictTo } = require('../middleware/auth')
 const validateMongoId = require('../middleware/validateMongoId')
 
-const { getCourseCertificate, getModuleCertificate, getMockCourseCertificate, getMockModuleCertificate } = require('../controllers/certificate.controller')
+const {
+  getCourseCertificate,
+  getModuleCertificate,
+  getMockCourseCertificate,
+  getMockModuleCertificate,
+  verifyCertificate,
+} = require('../controllers/certificate.controller')
 
 const router = express.Router()
+
+// Certificate verification route - public access
+router.get('/verify/:certificateId', verifyCertificate)
 
 // Real certificate routes - verify completion before providing certificate
 router.get('/:courseId/certificate', protect, validateMongoId, getCourseCertificate)
