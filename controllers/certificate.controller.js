@@ -53,12 +53,33 @@ exports.getCourseCertificate = async (req, res, next) => {
       return next(new AppError('Course not yet completed. All modules must be completed to generate a certificate.', 400))
     }
 
-    // Generate a certificate ID
+    // Check if a certificate already exists
+    let certificate = await Certificate.findOne({
+      user: userId,
+      course: courseId,
+      certificateType: 'course',
+      isRevoked: false,
+    })
+
+    // If certificate exists, use it
+    if (certificate) {
+      certificateData.certificateId = certificate.certificateId
+      certificateData.issueDate = certificate.issueDate
+
+      res.status(200).json({
+        status: 'success',
+        message: 'Existing certificate retrieved successfully',
+        data: certificateData,
+      })
+      return
+    }
+
+    // Generate a certificate ID for new certificate
     const certificateId = generateCertificateId('course')
     certificateData.certificateId = certificateId
 
     // Save certificate to database
-    const certificate = await Certificate.create({
+    certificate = await Certificate.create({
       certificateId,
       certificateType: 'course',
       user: userId,
@@ -98,12 +119,34 @@ exports.getModuleCertificate = async (req, res, next) => {
       return next(new AppError('Module not yet completed. All lessons must be completed to generate a certificate.', 400))
     }
 
-    // Generate a certificate ID
+    // Check if a certificate already exists
+    let certificate = await Certificate.findOne({
+      user: userId,
+      course: courseId,
+      module: moduleId,
+      certificateType: 'module',
+      isRevoked: false,
+    })
+
+    // If certificate exists, use it
+    if (certificate) {
+      certificateData.certificateId = certificate.certificateId
+      certificateData.issueDate = certificate.issueDate
+
+      res.status(200).json({
+        status: 'success',
+        message: 'Existing certificate retrieved successfully',
+        data: certificateData,
+      })
+      return
+    }
+
+    // Generate a certificate ID for new certificate
     const certificateId = generateCertificateId('module')
     certificateData.certificateId = certificateId
 
     // Save certificate to database
-    const certificate = await Certificate.create({
+    certificate = await Certificate.create({
       certificateId,
       certificateType: 'module',
       user: userId,
@@ -310,8 +353,44 @@ exports.getMockCourseCertificate = async (req, res, next) => {
       return next(new AppError('User not found', 404))
     }
 
-    // Generate certificate ID
-    const certificateId = generateCertificateId('course')
+    // Check if a mock certificate already exists
+    let certificate = await Certificate.findOne({
+      user: userId,
+      course: courseId,
+      certificateType: 'course',
+      'metadata.isMock': true,
+      isRevoked: false,
+    })
+
+    let certificateId
+
+    if (certificate) {
+      // Use existing certificate
+      certificateId = certificate.certificateId
+    } else {
+      // Generate certificate ID for new certificate
+      certificateId = generateCertificateId('course')
+
+      // Save mock certificate to database
+      certificate = await Certificate.create({
+        certificateId,
+        certificateType: 'course',
+        user: userId,
+        course: courseId,
+        courseTitle: course.title,
+        studentName: `${user.firstName} ${user.lastName}`,
+        completionDate: new Date(),
+        issueDate: new Date(),
+        metadata: {
+          isMock: true,
+          category: course.category,
+          totalModules: course.modules.length,
+          completedModules: course.modules.length,
+          instructors: course.instructors.map((i) => i.name),
+          creatorName: course.creator ? `${course.creator.firstName} ${course.creator.lastName}` : 'Unknown',
+        },
+      })
+    }
 
     // Generate mock certificate data
     const certificateData = {
@@ -321,34 +400,14 @@ exports.getMockCourseCertificate = async (req, res, next) => {
       studentName: `${user.firstName} ${user.lastName}`,
       instructors: course.instructors.map((i) => i.name),
       creatorName: course.creator ? `${course.creator.firstName} ${course.creator.lastName}` : 'Unknown',
-      completionDate: new Date(), // Current date as mock completion date
+      completionDate: certificate.completionDate,
       courseId: course._id,
       category: course.category,
       totalModules: course.modules.length,
       completedModules: course.modules.length, // All modules marked as completed
-      issueDate: new Date(),
+      issueDate: certificate.issueDate,
       certificateId,
     }
-
-    // Save mock certificate to database
-    const certificate = await Certificate.create({
-      certificateId,
-      certificateType: 'course',
-      user: userId,
-      course: courseId,
-      courseTitle: certificateData.courseTitle,
-      studentName: certificateData.studentName,
-      completionDate: certificateData.completionDate,
-      issueDate: new Date(),
-      metadata: {
-        isMock: true,
-        category: certificateData.category,
-        totalModules: certificateData.totalModules,
-        completedModules: certificateData.completedModules,
-        instructors: certificateData.instructors,
-        creatorName: certificateData.creatorName,
-      },
-    })
 
     res.status(200).json({
       status: 'success',
@@ -396,8 +455,48 @@ exports.getMockModuleCertificate = async (req, res, next) => {
       return next(new AppError('User not found', 404))
     }
 
-    // Generate certificate ID
-    const certificateId = generateCertificateId('module')
+    // Check if a mock certificate already exists
+    let certificate = await Certificate.findOne({
+      user: userId,
+      course: courseId,
+      module: moduleId,
+      certificateType: 'module',
+      'metadata.isMock': true,
+      isRevoked: false,
+    })
+
+    let certificateId
+
+    if (certificate) {
+      // Use existing certificate
+      certificateId = certificate.certificateId
+    } else {
+      // Generate certificate ID for new certificate
+      certificateId = generateCertificateId('module')
+
+      // Save mock certificate to database
+      certificate = await Certificate.create({
+        certificateId,
+        certificateType: 'module',
+        user: userId,
+        course: courseId,
+        module: moduleId,
+        courseTitle: course.title,
+        moduleTitle: module.title,
+        studentName: `${user.firstName} ${user.lastName}`,
+        completionDate: new Date(),
+        issueDate: new Date(),
+        metadata: {
+          isMock: true,
+          category: course.category,
+          totalLessons,
+          completedLessons: totalLessons,
+          progress: 100,
+          instructors: course.instructors.map((i) => i.name),
+          creatorName: course.creator ? `${course.creator.firstName} ${course.creator.lastName}` : 'Unknown',
+        },
+      })
+    }
 
     // Generate mock certificate data
     const certificateData = {
@@ -408,39 +507,16 @@ exports.getMockModuleCertificate = async (req, res, next) => {
       studentName: `${user.firstName} ${user.lastName}`,
       instructors: course.instructors.map((i) => i.name),
       creatorName: course.creator ? `${course.creator.firstName} ${course.creator.lastName}` : 'Unknown',
-      completionDate: new Date(), // Current date as mock completion date
+      completionDate: certificate.completionDate,
       courseId: course._id,
       moduleId: module._id,
       category: course.category,
       totalLessons: totalLessons,
       completedLessons: totalLessons, // All lessons marked as completed
       progress: 100, // 100% progress
-      issueDate: new Date(),
+      issueDate: certificate.issueDate,
       certificateId,
     }
-
-    // Save mock certificate to database
-    const certificate = await Certificate.create({
-      certificateId,
-      certificateType: 'module',
-      user: userId,
-      course: courseId,
-      module: moduleId,
-      courseTitle: certificateData.courseTitle,
-      moduleTitle: certificateData.moduleTitle,
-      studentName: certificateData.studentName,
-      completionDate: certificateData.completionDate,
-      issueDate: new Date(),
-      metadata: {
-        isMock: true,
-        category: certificateData.category,
-        totalLessons: certificateData.totalLessons,
-        completedLessons: certificateData.completedLessons,
-        progress: certificateData.progress,
-        instructors: certificateData.instructors,
-        creatorName: certificateData.creatorName,
-      },
-    })
 
     res.status(200).json({
       status: 'success',

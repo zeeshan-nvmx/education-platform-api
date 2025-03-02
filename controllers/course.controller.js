@@ -11,10 +11,10 @@ const instructorSchema = Joi.object({
   designation: Joi.string().trim(),
   expertise: Joi.array().items(Joi.string().trim()),
   socialLinks: Joi.object({
-    linkedin: Joi.string().uri().allow(''),
-    twitter: Joi.string().uri().allow(''),
-    website: Joi.string().uri().allow(''),
-  }),
+    linkedin: Joi.string().allow('', null).optional(),
+    twitter: Joi.string().allow('', null).optional(),
+    website: Joi.string().allow('', null).optional(),
+  }).optional(),
   bio: Joi.string().trim(),
   achievements: Joi.array().items(Joi.string()),
 }).options({ stripUnknown: true })
