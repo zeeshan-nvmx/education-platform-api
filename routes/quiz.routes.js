@@ -2,7 +2,7 @@ const express = require('express')
 const { protect, restrictTo } = require('../middleware/auth')
 const validateMongoId = require('../middleware/validateMongoId')
 
-const { createQuiz, getQuiz, updateQuiz, deleteQuiz, startQuiz, submitQuiz, gradeQuiz, getQuizResults, resetUserAttempts } = require('../controllers/quiz.controller')
+const { createQuiz, getQuiz, updateQuiz, deleteQuiz, startQuiz, submitQuiz, gradeQuiz, getQuizResults, resetUserAttempts, getUngradedSubmissions, getQuizNotifications, markNotificationsViewed} = require('../controllers/quiz.controller')
 
 // mergeParams allows access to params from parent router
 const router = express.Router({ mergeParams: true })
@@ -21,6 +21,25 @@ router.post('/reset-attempts', protect, restrictTo('admin', 'subAdmin'), validat
 
 // Get quiz details
 router.get('/', protect, validateMongoId, getQuiz)
+
+// Admin route to get all ungraded submissions
+router.get('/ungraded',
+  protect,
+  restrictTo('admin', 'subAdmin', 'moderator'),
+  getUngradedSubmissions
+);
+
+// Route to get notifications for graded quizzes
+router.get('/notifications',
+  protect,
+  getQuizNotifications
+);
+
+// Route to mark notifications as viewed
+router.post('/notifications/viewed',
+  protect,
+  markNotificationsViewed
+);
 
 // Start a new quiz attempt
 router.post('/attempts', protect, validateMongoId, startQuiz)
