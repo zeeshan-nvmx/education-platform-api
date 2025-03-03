@@ -396,100 +396,201 @@ exports.getQuiz = async (req, res, next) => {
   }
 }
 
-// Get all ungraded text-based quiz submissions
+// // Get all ungraded text-based quiz submissions
+// exports.getUngradedSubmissions = async (req, res, next) => {
+//   try {
+//     // Get the optional parameters (they'll be undefined if not provided)
+//     const { courseId, moduleId, lessonId } = req.params;
+    
+//     // Basic query for all ungraded attempts
+//     const query = { status: 'submitted' };
+    
+//     // Get all ungraded attempts with text answers
+//     const ungradedAttempts = await QuizAttempt.find(query)
+//       .populate({
+//         path: 'quiz',
+//         select: 'title lesson',
+//         populate: {
+//           path: 'lesson',
+//           select: 'title module',
+//           match: { isDeleted: false }
+//         }
+//       })
+//       .populate({
+//         path: 'user',
+//         select: 'firstName lastName email'
+//       })
+//       .sort('-submittedAt')
+//       .lean();
+    
+//     // Filter in memory if course/module/lesson IDs are provided
+//     let filteredAttempts = ungradedAttempts;
+    
+//     if (moduleId) {
+//       filteredAttempts = filteredAttempts.filter(attempt => 
+//         attempt.quiz?.lesson?.module?.toString() === moduleId
+//       );
+//     }
+    
+//     if (courseId) {
+//       // Get all modules in this course
+//       const moduleIds = await Module.find({ 
+//         course: courseId, 
+//         isDeleted: false 
+//       }).distinct('_id');
+      
+//       // Convert ObjectIds to strings for comparison
+//       const moduleIdStrings = moduleIds.map(id => id.toString());
+      
+//       // Filter attempts by course's modules
+//       filteredAttempts = filteredAttempts.filter(attempt => 
+//         moduleIdStrings.includes(attempt.quiz?.lesson?.module?.toString())
+//       );
+//     }
+    
+//     if (lessonId) {
+//       filteredAttempts = filteredAttempts.filter(attempt => 
+//         attempt.quiz?.lesson?._id?.toString() === lessonId
+//       );
+//     }
+    
+//     // Format the response with useful information
+//     const formattedAttempts = filteredAttempts.map(attempt => ({
+//       attemptId: attempt._id,
+//       quiz: {
+//         id: attempt.quiz?._id,
+//         title: attempt.quiz?.title
+//       },
+//       lesson: {
+//         id: attempt.quiz?.lesson?._id,
+//         title: attempt.quiz?.lesson?.title,
+//         module: attempt.quiz?.lesson?.module
+//       },
+//       user: {
+//         id: attempt.user?._id,
+//         name: `${attempt.user?.firstName} ${attempt.user?.lastName}`,
+//         email: attempt.user?.email
+//       },
+//       submittedAt: attempt.submittedAt || attempt.updatedAt,
+//       textQuestions: attempt.answers
+//         .filter(answer => !answer.hasOwnProperty('selectedOption'))
+//         .length
+//     }));
+    
+//     res.status(200).json({
+//       status: 'success',
+//       count: formattedAttempts.length,
+//       data: formattedAttempts
+//     });
+//   } catch (error) {
+//     next(error);
+//   }
+// }
+
 exports.getUngradedSubmissions = async (req, res, next) => {
   try {
-    const { courseId, moduleId } = req.params;
-    
-    // Get all ungraded attempts with text answers
-    const ungradedAttempts = await QuizAttempt.find({
-      status: 'submitted'
+    // Get the optional parameters (they'll be undefined if not provided)
+    const { courseId, moduleId, lessonId } = req.params
+
+    // Query for submissions that need manual grading (status: 'submitted')
+    const query = { status: 'submitted' }
+
+    // Get all ungraded attempts
+    const ungradedAttempts = await QuizAttempt.find(query)
+      .populate({
+        path: 'quiz',
+        select: 'title lesson questions',
+        populate: {
+          path: 'lesson',
+          select: 'title module',
+          match: { isDeleted: false },
+        },
+      })
+      .populate({
+        path: 'user',
+        select: 'firstName lastName email',
+      })
+      .sort('-submittedAt')
+      .lean()
+
+    // Filter to only include attempts with text questions that need grading
+    const attemptsWithTextQuestions = ungradedAttempts.filter((attempt) => {
+      // Only keep attempts that have at least one text answer
+      return attempt.answers.some(
+        (answer) =>
+          // Text answers have textAnswer property but no selectedOption property
+          answer.textAnswer && !answer.hasOwnProperty('selectedOption')
+      )
     })
-    .populate({
-      path: 'quiz',
-      select: 'title lesson',
-      populate: {
-        path: 'lesson',
-        select: 'title module',
-        match: { isDeleted: false }
-      }
-    })
-    .populate({
-      path: 'user',
-      select: 'firstName lastName email'
-    })
-    .sort('-submittedAt')
-    .lean();
-    
-    // Filter by course and module if provided
-    const filteredAttempts = ungradedAttempts.filter(attempt => {
-      // Skip attempts with no quiz or lesson data
-      if (!attempt.quiz || !attempt.quiz.lesson) return false;
-      
-      // If module is specified, filter by it
-      if (moduleId && attempt.quiz.lesson.module.toString() !== moduleId) {
-        return false;
-      }
-      
-      // If course is specified, we need to fetch the module to check its course
-      if (courseId) {
-        // We'll do this filtering after the query for simplicity
-        return true;
-      }
-      
-      return true;
-    });
-    
-    // If courseId specified, do a second pass filtering for course
-    let finalAttempts = filteredAttempts;
+
+    // Apply additional filters if course/module/lesson IDs are provided
+    let filteredAttempts = attemptsWithTextQuestions
+
+    if (moduleId) {
+      filteredAttempts = filteredAttempts.filter((attempt) => attempt.quiz?.lesson?.module?.toString() === moduleId)
+    }
+
     if (courseId) {
       // Get all modules in this course
-      const moduleIds = await Module.find({ 
-        course: courseId, 
-        isDeleted: false 
-      }).distinct('_id');
-      
+      const moduleIds = await Module.find({
+        course: courseId,
+        isDeleted: false,
+      }).distinct('_id')
+
       // Convert ObjectIds to strings for comparison
-      const moduleIdStrings = moduleIds.map(id => id.toString());
-      
+      const moduleIdStrings = moduleIds.map((id) => id.toString())
+
       // Filter attempts by course's modules
-      finalAttempts = filteredAttempts.filter(attempt => 
-        moduleIdStrings.includes(attempt.quiz.lesson.module.toString())
-      );
+      filteredAttempts = filteredAttempts.filter((attempt) => moduleIdStrings.includes(attempt.quiz?.lesson?.module?.toString()))
     }
-    
+
+    if (lessonId) {
+      filteredAttempts = filteredAttempts.filter((attempt) => attempt.quiz?.lesson?._id?.toString() === lessonId)
+    }
+
     // Format the response with useful information
-    const formattedAttempts = finalAttempts.map(attempt => ({
-      attemptId: attempt._id,
-      quiz: {
-        id: attempt.quiz._id,
-        title: attempt.quiz.title
-      },
-      lesson: {
-        id: attempt.quiz.lesson._id,
-        title: attempt.quiz.lesson.title,
-        module: attempt.quiz.lesson.module
-      },
-      user: {
-        id: attempt.user._id,
-        name: `${attempt.user.firstName} ${attempt.user.lastName}`,
-        email: attempt.user.email
-      },
-      submittedAt: attempt.submittedAt || attempt.updatedAt,
-      textQuestions: attempt.answers
-        .filter(answer => !answer.hasOwnProperty('selectedOption'))
-        .length
-    }));
-    
+    const formattedAttempts = filteredAttempts.map((attempt) => {
+      // Count text questions that need grading
+      const textQuestionsCount = attempt.answers.filter((answer) => answer.textAnswer && !answer.hasOwnProperty('selectedOption')).length
+
+      return {
+        attemptId: attempt._id,
+        quiz: {
+          id: attempt.quiz?._id,
+          title: attempt.quiz?.title,
+        },
+        lesson: {
+          id: attempt.quiz?.lesson?._id,
+          title: attempt.quiz?.lesson?.title,
+          module: attempt.quiz?.lesson?.module,
+        },
+        user: {
+          id: attempt.user?._id,
+          name: `${attempt.user?.firstName} ${attempt.user?.lastName}`,
+          email: attempt.user?.email,
+        },
+        submittedAt: attempt.submittedAt || attempt.updatedAt,
+        textQuestionsCount: textQuestionsCount,
+        // Include the text answers that need grading
+        textAnswers: attempt.answers
+          .filter((answer) => answer.textAnswer && !answer.hasOwnProperty('selectedOption'))
+          .map((answer) => ({
+            questionId: answer.questionId,
+            textAnswer: answer.textAnswer,
+          })),
+      }
+    })
+
     res.status(200).json({
       status: 'success',
+      message: 'Ungraded submissions fetched successfully',
       count: formattedAttempts.length,
-      data: formattedAttempts
-    });
+      data: formattedAttempts,
+    })
   } catch (error) {
-    next(error);
+    next(error)
   }
-};
+}
 
 // Get notifications for graded quizzes
 exports.getQuizNotifications = async (req, res, next) => {
@@ -497,7 +598,7 @@ exports.getQuizNotifications = async (req, res, next) => {
     const userId = req.user._id;
     
     // Find recently graded attempts for this user
-    // That haven't been viewed yet (could add a "viewed" flag)
+    // That haven't been viewed yet
     const recentlyGradedAttempts = await QuizAttempt.find({
       user: userId,
       status: 'graded',
@@ -538,6 +639,7 @@ exports.getQuizNotifications = async (req, res, next) => {
     
     res.status(200).json({
       status: 'success',
+      message: 'Quiz notifications fetched successfully',
       count: notifications.length,
       data: notifications
     });
@@ -557,7 +659,6 @@ exports.markNotificationsViewed = async (req, res, next) => {
     }
     
     // Update attempts to set notification as viewed
-    // Note: You would need to add a notificationViewed field to your QuizAttempt schema
     await QuizAttempt.updateMany(
       { 
         _id: { $in: attemptIds }, 

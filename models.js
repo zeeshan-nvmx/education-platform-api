@@ -653,6 +653,10 @@ const quizAttemptSchema = new mongoose.Schema(
       type: Number,
       required: true,
     },
+    notificationViewed: {
+      type: Boolean,
+      default: false,
+    },
     gradedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
