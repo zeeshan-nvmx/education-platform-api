@@ -5,10 +5,13 @@ const adminController = require('../controllers/admin.controller')
 const router = express.Router()
 
 const { createUser, getUsers, deleteUser, updateUserRole } = adminController
-const { getUngradedSubmissions } = require('../controllers/quiz.controller')
+const { getUngradedSubmissions, getQuizAttemptById } = require('../controllers/quiz.controller')
 
 // Non conflicting submitted quiz grading route for admins and moderators
-router.get('/quizzes/ungraded', protect, restrictTo('admin', 'subAdmin', 'moderator'), getUngradedSubmissions);
+router.get('/quizzes/ungraded', protect, restrictTo('admin', 'subAdmin', 'moderator'), getUngradedSubmissions)
+
+// Get a single quiz attempt
+router.get('/quizzes/attempts/:attemptId', protect, restrictTo('admin', 'subAdmin', 'moderator'), getQuizAttemptById)
 
 // User creation
 router.post('/users', protect, restrictTo('admin', 'subAdmin'), createUser)

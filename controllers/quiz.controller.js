@@ -1305,6 +1305,133 @@ exports.gradeQuiz = async (req, res, next) => {
   }
 }
 
+// Controller function to get a single quiz attempt
+exports.getQuizAttemptById = async (req, res, next) => {
+  try {
+    const { attemptId } = req.params;
+    
+    // Find the attempt with populated data
+    const attempt = await QuizAttempt.findById(attemptId)
+      .populate({
+        path: 'quiz',
+        select: 'title lesson questions totalMarks',
+        populate: {
+          path: 'lesson',
+          select: 'title module',
+          populate: {
+            path: 'module',
+            select: 'title course',
+            populate: {
+              path: 'course',
+              select: 'title'
+            }
+          }
+        }
+      })
+      .populate({
+        path: 'user',
+        select: 'firstName lastName email'
+      })
+      .populate({
+        path: 'gradedBy',
+        select: 'firstName lastName'
+      });
+    
+    if (!attempt) {
+      return next(new AppError('Quiz attempt not found', 404));
+    }
+    
+    // Check if user has permission
+    const userId = req.user._id;
+    const isAdmin = ['admin', 'subAdmin', 'moderator'].includes(req.user.role);
+    
+    // Only allow the user who took the quiz or admins to view the attempt
+    if (!isAdmin && attempt.user._id.toString() !== userId.toString()) {
+      return next(new AppError('You do not have permission to view this attempt', 403));
+    }
+    
+    // Prepare the questions with answers
+    const questionsWithAnswers = [];
+    
+    // Map answers to their respective questions
+    for (const question of attempt.quiz.questions) {
+      // Find the answer for this question
+      const answer = attempt.answers.find(a => 
+        a.questionId.toString() === question._id.toString()
+      );
+      
+      questionsWithAnswers.push({
+        questionId: question._id,
+        question: question.question,
+        type: question.type,
+        marks: question.marks,
+        maxMarks: question.marks,
+        userAnswer: {
+          selectedOption: answer?.selectedOption,
+          textAnswer: answer?.textAnswer,
+          marks: answer?.marks,
+          feedback: answer?.feedback,
+          isCorrect: answer?.isCorrect
+        },
+        options: question.type === 'mcq' ? 
+          // Admin can see correct answers
+          (isAdmin ? question.options : 
+            // Regular users only see options without correct answers
+            question.options.map(opt => ({
+              _id: opt._id,
+              option: opt.option
+            }))) 
+          : undefined
+      });
+    }
+    
+    // Format the response
+    const result = {
+      attemptId: attempt._id,
+      quiz: {
+        id: attempt.quiz._id,
+        title: attempt.quiz.title,
+        totalMarks: attempt.quiz.totalMarks
+      },
+      lesson: {
+        id: attempt.quiz.lesson._id,
+        title: attempt.quiz.lesson.title
+      },
+      module: {
+        id: attempt.quiz.lesson.module._id,
+        title: attempt.quiz.lesson.module.title
+      },
+      course: {
+        id: attempt.quiz.lesson.module.course._id,
+        title: attempt.quiz.lesson.module.course.title
+      },
+      user: {
+        id: attempt.user._id,
+        name: `${attempt.user.firstName} ${attempt.user.lastName}`,
+        email: attempt.user.email
+      },
+      score: attempt.score,
+      percentage: attempt.percentage,
+      passed: attempt.passed,
+      status: attempt.status,
+      startTime: attempt.startTime,
+      submitTime: attempt.submitTime,
+      gradedBy: attempt.gradedBy ? 
+        `${attempt.gradedBy.firstName} ${attempt.gradedBy.lastName}` : 
+        undefined,
+      questions: questionsWithAnswers
+    };
+    
+    res.status(200).json({
+      status: 'success',
+      message: 'Quiz attempt fetched successfully',
+      data: result
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // Get quiz results
 exports.getQuizResults = async (req, res, next) => {
   try {
