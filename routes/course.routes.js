@@ -8,7 +8,7 @@ const { uploadVideo } = require('../middleware/upload')
 // Import module router
 const moduleRouter = require('./module.routes')
 const lessonRouter = require('./lesson.routes')
-const moduleReviewRouter = require('./moduleReview.routes')
+// const moduleReviewRouter = require('./moduleReview.routes')
 
 // Configure multer for memory storage
 const upload = multer({

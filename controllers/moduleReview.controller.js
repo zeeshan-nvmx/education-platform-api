@@ -148,6 +148,46 @@ exports.deleteModuleReview = async (req, res, next) => {
   }
 }
 
+// Delete a specific module review (admin only)
+exports.deleteReviewAdmin = async (req, res, next) => {
+  try {
+    const { moduleId, courseId, reviewId } = req.params;
+
+    // Verify module exists
+    const module = await Module.findOne({
+      _id: moduleId,
+      course: courseId,
+      isDeleted: false,
+    });
+    
+    if (!module) {
+      return next(new AppError('Module not found', 404));
+    }
+
+    // Find and soft delete the review
+    const review = await ModuleReview.findOneAndUpdate(
+      {
+        _id: reviewId,
+        module: moduleId,
+        course: courseId,
+        isDeleted: false,
+      },
+      { isDeleted: true },
+      { new: true }
+    );
+
+    if (!review) {
+      return next(new AppError('Review not found', 404));
+    }
+
+    res.status(200).json({
+      message: 'Module review deleted successfully by admin',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // Get public reviews for a module (accessible to all users)
 exports.getPublicModuleReviews = async (req, res, next) => {
   try {

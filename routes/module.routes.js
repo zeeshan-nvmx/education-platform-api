@@ -19,7 +19,7 @@ const {
 } = require('../controllers/module.controller')
 
 // Import module review controller
-const { createModuleReview, getModuleReview, deleteModuleReview, getAllModuleReviews, getPublicModuleReviews } = require('../controllers/moduleReview.controller')
+const { createModuleReview, getModuleReview, deleteModuleReview, getAllModuleReviews, getPublicModuleReviews,deleteReviewAdmin } = require('../controllers/moduleReview.controller')
 
 const router = express.Router({ mergeParams: true })
 
@@ -47,6 +47,7 @@ router.delete('/:moduleId/reviews/my', protect, validateMongoId, deleteModuleRev
 
 // Admin review routes
 router.get('/:moduleId/reviews/admin', protect, restrictTo('admin', 'subAdmin', 'moderator'), validateMongoId, getAllModuleReviews)
+router.delete('/:moduleId/reviews/:reviewId', protect, restrictTo('admin', 'subAdmin', 'moderator'), validateMongoId, deleteReviewAdmin)
 
 module.exports = router
 
