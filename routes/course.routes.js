@@ -3,6 +3,7 @@ const multer = require('multer')
 const { protect, restrictTo, optionalAuth } = require('../middleware/auth')
 const { checkCourseOwnership } = require('../middleware/checkOwnership')
 const validateMongoId = require('../middleware/validateMongoId')
+const { uploadVideo } = require('../middleware/upload')
 
 
 // Import module router
@@ -36,6 +37,7 @@ const {
   getAllCourses,
   getCourse,
   updateCourse,
+  uploadCourseTrailer,
   deleteCourse,
   getFeaturedCourses,
   getCoursesByCategory,
@@ -75,6 +77,9 @@ router.get('/:courseId/modules/:moduleId/access', protect, validateMongoId, chec
 router.post('/', protect, restrictTo('admin', 'subAdmin'), uploadFields, createCourse)
 router.put('/:courseId', protect, restrictTo('admin', 'subAdmin'), validateMongoId, /* checkCourseOwnership, */ uploadFields, updateCourse)
 router.delete('/:courseId', protect, restrictTo('admin', 'subAdmin'), validateMongoId, /* checkCourseOwnership, */ deleteCourse)
+
+// trailer upload route
+router.post('/:courseId/trailer', protect, restrictTo('admin', 'subAdmin'), validateMongoId, uploadVideo.single('video'), uploadCourseTrailer)
 
 // Module-related routes
 router.get('/:courseId/modules', validateMongoId, getCourseModules)

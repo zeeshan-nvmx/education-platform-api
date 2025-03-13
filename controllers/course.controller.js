@@ -4,6 +4,7 @@ const { Course, Module, User, Progress, Lesson, Quiz, QuizAttempt, LessonProgres
 const { AppError } = require('../utils/errors')
 const { uploadToS3, deleteFromS3 } = require('../utils/s3')
 const sanitizeHtml = require('sanitize-html')
+const CloudflareService = require('../utils/cloudflare')
 
 const instructorSchema = Joi.object({
   name: Joi.string().required().trim(),
@@ -327,15 +328,15 @@ exports.getPublicCoursesList = async (req, res, next) => {
 
     // Conditional population based on authentication
     let coursesQuery = Course.find(query)
-      .select('title description category thumbnail price rating totalStudents featured createdAt creator modules')
+      .select('title description category thumbnail price rating totalStudents featured createdAt creator modules trailerUrl trailerThumbnail trailerCloudflareVideoId')
       .populate({
         path: 'modules',
         select: 'title description order price lessons',
-        match: {}, 
+        match: {},
         populate: {
           path: 'lessons',
           select: 'title description order duration requireQuizPass',
-          match: {}, 
+          match: {},
           options: { sort: { order: 1 } },
         },
       })
@@ -369,12 +370,15 @@ exports.getPublicCoursesList = async (req, res, next) => {
         description: course.description,
         category: course.category,
         thumbnail: course.thumbnail,
+        trailerUrl: course.trailerUrl || '',
+        trailerThumbnail: course.trailerThumbnail || '',
+        trailerCloudflareVideoId: course.trailerCloudflareVideoId || '',
         price: course.price,
         rating: course.rating,
         totalStudents: course.totalStudents,
         featured: course.featured,
         createdAt: course.createdAt,
-        creator: creatorInfo, 
+        creator: creatorInfo,
         modules: course.modules.map((module) => ({
           _id: module._id,
           title: module.title,
@@ -778,6 +782,9 @@ exports.getAllCourses = async (req, res, next) => {
       data: {
         courses: courses.map((course) => ({
           ...course,
+          trailerUrl: course.trailerUrl || null,
+          trailerThumbnail: course.trailerThumbnail || null,
+          trailerCloudflareVideoId: course.trailerCloudflareVideoId || null,
           creator: {
             name: `${course.creator?.firstName || ''} ${course.creator?.lastName || ''}`.trim(),
             email: course.creator?.email,
@@ -869,7 +876,7 @@ exports.getCourse = async (req, res, next) => {
     const isAdmin = authenticatedUser?.role === 'admin'
     console.log(`User roles - Creator: ${isCreator}, Admin: ${isAdmin}`)
 
-    // --- Build the Course Data ---
+    //  Build the Course Data 
     const courseDetails = {
       _id: course._id,
       title: course.title || '',
@@ -878,6 +885,9 @@ exports.getCourse = async (req, res, next) => {
       category: course.category || '',
       price: course.price || 0,
       thumbnail: course.thumbnail || '',
+      trailerUrl: course.trailerUrl || '',
+      trailerThumbnail: course.trailerThumbnail || '',
+      trailerCloudflareVideoId: course.trailerCloudflareVideoId || '',
       rating: course.rating || 0,
       totalStudents: course.totalStudents || 0,
       featured: course.featured || false,
@@ -1185,7 +1195,6 @@ exports.getCourse = async (req, res, next) => {
   }
 }
 
-
 exports.updateCourse = async (req, res, next) => {
   let newUploadedImageKeys = []
 
@@ -1262,6 +1271,101 @@ exports.updateCourse = async (req, res, next) => {
     })
   } catch (error) {
     await cleanupInstructorImages(newUploadedImageKeys)
+    next(error)
+  }
+}
+
+exports.uploadCourseTrailer = async (req, res, next) => {
+  try {
+    // Initial validations before any operations
+    if (!req.file) {
+      return next(new AppError('Please provide a video file', 400))
+    }
+
+    // Check file size
+    const maxSize = 500 * 1024 * 1024 // 500MB in bytes for trailers (smaller than lessons)
+    if (req.file.size > maxSize) {
+      return next(new AppError('Video file too large. Maximum size is 500MB', 400))
+    }
+
+    // Check file type
+    if (!req.file.mimetype.startsWith('video/')) {
+      return next(new AppError('Please upload only video files', 400))
+    }
+
+    // Find the course without transaction
+    const course = await Course.findOne({
+      _id: req.params.courseId,
+      isDeleted: { $ne: true },
+    })
+
+    if (!course) {
+      return next(new AppError('Course not found', 404))
+    }
+
+    // Store old video ID for cleanup
+    const oldVideoId = course.trailerCloudflareVideoId
+
+    // Upload new video to Cloudflare (outside transaction)
+    let uploadResult
+    try {
+      uploadResult = await CloudflareService.uploadVideo(req.file)
+    } catch (uploadError) {
+      console.error('Error during trailer upload:', uploadError)
+      return next(new AppError('Failed to upload trailer. Please try again.', 500))
+    }
+
+    // Now start MongoDB transaction for database updates
+    const session = await mongoose.startSession()
+    session.startTransaction()
+
+    try {
+      // Update course with only essential video details
+      course.trailerUrl = uploadResult.videoDetails.playbackUrl
+      course.trailerCloudflareVideoId = uploadResult.videoId
+      course.trailerThumbnail = uploadResult.videoDetails.thumbnail
+
+      await course.save({ session })
+      await session.commitTransaction()
+
+      // After successful transaction, delete old video if it exists
+      if (oldVideoId) {
+        try {
+          await CloudflareService.deleteVideo(oldVideoId)
+        } catch (error) {
+          console.error('Error deleting old trailer video:', error)
+          // Don't fail the request if old video deletion fails
+        }
+      }
+
+      // Force garbage collection
+      if (global.gc) {
+        global.gc()
+      }
+
+      res.status(200).json({
+        message: 'Course trailer uploaded successfully',
+        data: {
+          trailerUrl: course.trailerUrl,
+          trailerThumbnail: course.trailerThumbnail,
+          trailerCloudflareVideoId: course.trailerCloudflareVideoId,
+        },
+      })
+    } catch (error) {
+      // If database update fails, try to delete the newly uploaded video
+      try {
+        await CloudflareService.deleteVideo(uploadResult.videoId)
+      } catch (deleteError) {
+        console.error('Error deleting failed upload:', deleteError)
+      }
+
+      await session.abortTransaction()
+      throw error
+    } finally {
+      session.endSession()
+    }
+  } catch (error) {
+    console.error('Error in uploadCourseTrailer:', error)
     next(error)
   }
 }

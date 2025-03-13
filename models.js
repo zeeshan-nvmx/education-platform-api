@@ -216,6 +216,9 @@ const courseSchema = new mongoose.Schema(
       min: 0,
       max: 5,
     },
+    trailerUrl: { type: String, default: null },
+    trailerCloudflareVideoId: { type: String, default: null },
+    trailerThumbnail: { type: String, default: null },
     totalStudents: {
       type: Number,
       default: 0,
@@ -941,7 +944,6 @@ const certificateSchema = new mongoose.Schema(
     timestamps: true,
   }
 )
-
 
 const reviewSchema = new mongoose.Schema(
   {
