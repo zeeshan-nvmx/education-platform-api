@@ -1,6 +1,7 @@
 const { User, Course, Progress } = require('../models')
 const { AppError } = require('../utils/errors')
 const Joi = require('joi')
+const { uploadToS3, deleteFromS3 } = require('../utils/s3')
 
 // Moved validation schema inside controller
 const updateProfileSchema = Joi.object({
@@ -73,46 +74,65 @@ exports.updateProfile = async (req, res, next) => {
   }
 }
 
-// exports.getEnrolledCourses = async (req, res, next) => {
-//   try {
-//     const user = await User.findById(req.user._id).populate({
-//       path: 'enrolledCourses.course',
-//       select: 'title description thumbnail price rating',
-//     })
+exports.uploadProfileImage = async (req, res, next) => {
+  try {
+    // Check if image file was provided
+    if (!req.file) {
+      return next(new AppError('Please provide an image file', 400))
+    }
 
-//     if (!user) {
-//       return next(new AppError('User not found', 404))
-//     }
+    // Check file type
+    if (!req.file.mimetype.startsWith('image/')) {
+      return next(new AppError('Please upload only image files', 400))
+    }
 
-//     const enrolledCourses = await Promise.all(
-//       user.enrolledCourses.map(async (enrollment) => {
-//         const progress = await Progress.findOne({
-//           user: req.user._id,
-//           course: enrollment.course._id,
-//         })
+    // Check file size (limit to 5MB)
+    const maxSize = 5 * 1024 * 1024
+    if (req.file.size > maxSize) {
+      return next(new AppError('Image file too large. Maximum size is 5MB', 400))
+    }
 
-//         return {
-//           course: enrollment.course,
-//           enrolledAt: enrollment.enrolledAt,
-//           progress: progress
-//             ? {
-//                 completedLessons: progress.completedLessons.length,
-//                 completedQuizzes: progress.completedQuizzes.length,
-//                 lastAccessed: progress.lastAccessed,
-//               }
-//             : null,
-//         }
-//       })
-//     )
+    // Find the user
+    const user = await User.findById(req.user._id)
+    if (!user) {
+      return next(new AppError('User not found', 404))
+    }
 
-//     res.status(200).json({
-//       message: 'Enrolled courses fetched successfully',
-//       data: enrolledCourses,
-//     })
-//   } catch (error) {
-//     next(error)
-//   }
-// }
+    // Store old image key for cleanup
+    const oldImageKey = user.profileImageKey
+
+    // Upload new image to S3
+    // Replace spaces with hyphens in the original filename
+    const sanitizedFilename = req.file.originalname.replace(/\s+/g, '-')
+    const profileImageKey = `profile-images/${req.user._id}-${Date.now()}-${sanitizedFilename}`
+    const profileImageUrl = await uploadToS3(req.file, profileImageKey)
+
+    // Update user with new image details
+    user.profileImage = profileImageUrl
+    user.profileImageKey = profileImageKey
+    await user.save()
+
+    // Delete old image if it exists
+    if (oldImageKey) {
+      try {
+        await deleteFromS3(oldImageKey)
+      } catch (error) {
+        console.error('Error deleting old profile image:', error)
+        // Don't fail the request if old image deletion fails
+      }
+    }
+
+    res.status(200).json({
+      message: 'Profile image uploaded successfully',
+      data: {
+        profileImage: user.profileImage,
+      },
+    })
+  } catch (error) {
+    console.error('Error in uploadProfileImage:', error)
+    next(error)
+  }
+}
 
 exports.getEnrolledCourses = async (req, res, next) => {
   try {
