@@ -782,9 +782,9 @@ exports.getAllCourses = async (req, res, next) => {
       data: {
         courses: courses.map((course) => ({
           ...course,
-          trailerUrl: course.trailerUrl || null,
-          trailerThumbnail: course.trailerThumbnail || null,
-          trailerCloudflareVideoId: course.trailerCloudflareVideoId || null,
+          trailerUrl: course.trailerUrl || '',
+          trailerThumbnail: course.trailerThumbnail || '',
+          trailerCloudflareVideoId: course.trailerCloudflareVideoId || '',
           creator: {
             name: `${course.creator?.firstName || ''} ${course.creator?.lastName || ''}`.trim(),
             email: course.creator?.email,
