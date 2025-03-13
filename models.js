@@ -296,6 +296,12 @@ const moduleSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    rating: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 5,
+    },
     dependencies: [
       {
         module: {
@@ -340,6 +346,91 @@ moduleSchema.pre('find', function () {
 moduleSchema.pre('findOne', function () {
   this.where({ isDeleted: false })
 })
+
+const moduleReviewSchema = new mongoose.Schema(
+  {
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true,
+    },
+    module: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Module',
+      required: true,
+      index: true,
+    },
+    course: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Course',
+      required: true,
+      index: true,
+    },
+    rating: {
+      type: Number,
+      required: true,
+      min: 1,
+      max: 5,
+    },
+    feedback: String,
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+  },
+  { timestamps: true }
+)
+
+moduleReviewSchema.index({ user: 1, module: 1 }, { unique: true })
+moduleReviewSchema.pre('find', function () {
+  this.where({ isDeleted: false })
+})
+
+// Update module rating when a review is added or modified
+moduleReviewSchema.post('save', async function () {
+  const ModuleReview = this.constructor
+  const Module = mongoose.model('Module')
+  const Course = mongoose.model('Course')
+
+  // Update module rating
+  const moduleStats = await ModuleReview.aggregate([
+    { $match: { module: this.module, isDeleted: false } },
+    {
+      $group: {
+        _id: '$module',
+        avgRating: { $avg: '$rating' },
+      },
+    },
+  ])
+
+  await Module.findByIdAndUpdate(this.module, {
+    rating: moduleStats.length > 0 ? Math.round(moduleStats[0].avgRating * 10) / 10 : 0,
+  })
+
+  // Update course rating based on module reviews
+  const courseId = this.course
+
+  // Get all module reviews for this course
+  const courseStats = await ModuleReview.aggregate([
+    { $match: { course: courseId, isDeleted: false } },
+    {
+      $group: {
+        _id: '$course',
+        avgRating: { $avg: '$rating' },
+      },
+    },
+  ])
+
+  // Update the course rating
+  if (courseStats.length > 0) {
+    await Course.findByIdAndUpdate(courseId, {
+      rating: Math.round(courseStats[0].avgRating * 10) / 10,
+    })
+  }
+})
+
 
 const lessonSchema = new mongoose.Schema(
   {
@@ -1128,6 +1219,7 @@ module.exports = {
   User: mongoose.model('User', userSchema),
   Course: mongoose.model('Course', courseSchema),
   Module: mongoose.model('Module', moduleSchema),
+  ModuleReview: mongoose.model('ModuleReview', moduleReviewSchema),
   Lesson: mongoose.model('Lesson', lessonSchema),
   Quiz: mongoose.model('Quiz', quizSchema),
   QuizAttempt: mongoose.model('QuizAttempt', quizAttemptSchema),
