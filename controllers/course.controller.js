@@ -1485,7 +1485,7 @@ exports.getCourseModules = async (req, res, next) => {
   try {
     const course = await Course.findById(req.params.courseId).populate({
       path: 'modules',
-      select: 'title description order price prerequisites isAccessible dependencies', // No isDeleted
+      select: 'title description order price prerequisites isAccessible dependencies rating',
       options: { sort: { order: 1 } },
     })
 
@@ -1493,7 +1493,30 @@ exports.getCourseModules = async (req, res, next) => {
       return next(new AppError('Course not found', 404))
     }
 
-    const enrollment = req.user.enrolledCourses?.find((e) => e.course.toString() === course._id.toString())
+    // Handle unauthenticated users - maintain original response format with null values
+    if (!req.user) {
+      const modulesWithFormat = course.modules.map((module) => {
+        const moduleObj = module.toObject()
+
+        // Maintain the same structure as authenticated users for frontend compatibility
+        return {
+          ...moduleObj,
+          isEnrolled: false,
+          enrollmentType: null,
+          progress: null,
+          prerequisitesMet: null,
+          reviewCount: 0, // Add this field for consistency
+        }
+      })
+
+      return res.status(200).json({
+        message: 'Course modules fetched successfully',
+        data: modulesWithFormat,
+      })
+    }
+
+    // For authenticated users, check enrollment
+    const enrollment = req.user.enrolledCourses?.find((e) => e && e.course && e.course.toString() === course._id.toString())
 
     if (!enrollment) {
       return next(new AppError('You are not enrolled in this course', 403))
@@ -1504,7 +1527,9 @@ exports.getCourseModules = async (req, res, next) => {
         const moduleObj = module.toObject()
 
         const isFullAccess = enrollment.enrollmentType === 'full'
-        const isModuleEnrolled = enrollment.enrolledModules?.some((em) => em.module.toString() === module._id.toString())
+        const enrolledModules = enrollment.enrolledModules || []
+        const isModuleEnrolled = enrolledModules.some((em) => em && em.module && em.module.toString() === module._id.toString())
+
         moduleObj.isEnrolled = isFullAccess || isModuleEnrolled
 
         if (moduleObj.isEnrolled) {
@@ -1527,7 +1552,16 @@ exports.getCourseModules = async (req, res, next) => {
             moduleObj.prerequisitesMet = await checkPrerequisites(module.prerequisites, req.user._id, req.params.courseId)
           }
         }
+
         moduleObj.enrollmentType = isFullAccess ? 'full' : isModuleEnrolled ? 'module' : null
+
+        // Get review count for this module
+        const reviewCount = await ModuleReview.countDocuments({
+          module: module._id,
+          isDeleted: false,
+        })
+        moduleObj.reviewCount = reviewCount
+
         return moduleObj
       })
     )
@@ -1540,6 +1574,66 @@ exports.getCourseModules = async (req, res, next) => {
     next(error)
   }
 }
+
+// exports.getCourseModules = async (req, res, next) => {
+//   try {
+//     const course = await Course.findById(req.params.courseId).populate({
+//       path: 'modules',
+//       select: 'title description order price prerequisites isAccessible dependencies', // No isDeleted
+//       options: { sort: { order: 1 } },
+//     })
+
+//     if (!course) {
+//       return next(new AppError('Course not found', 404))
+//     }
+
+//     const enrollment = req.user.enrolledCourses?.find((e) => e.course.toString() === course._id.toString())
+
+//     if (!enrollment) {
+//       return next(new AppError('You are not enrolled in this course', 403))
+//     }
+
+//     const moduleProgress = await Promise.all(
+//       course.modules.map(async (module) => {
+//         const moduleObj = module.toObject()
+
+//         const isFullAccess = enrollment.enrollmentType === 'full'
+//         const isModuleEnrolled = enrollment.enrolledModules?.some((em) => em.module.toString() === module._id.toString())
+//         moduleObj.isEnrolled = isFullAccess || isModuleEnrolled
+
+//         if (moduleObj.isEnrolled) {
+//           const progress = await Progress.findOne({
+//             user: req.user._id,
+//             course: req.params.courseId,
+//             module: module._id,
+//           })
+
+//           if (progress) {
+//             moduleObj.progress = {
+//               overall: progress.progress,
+//               completedLessons: progress.completedLessons,
+//               completedQuizzes: progress.completedQuizzes,
+//               lastAccessed: progress.lastAccessed,
+//             }
+//           }
+
+//           if (module.prerequisites?.length > 0) {
+//             moduleObj.prerequisitesMet = await checkPrerequisites(module.prerequisites, req.user._id, req.params.courseId)
+//           }
+//         }
+//         moduleObj.enrollmentType = isFullAccess ? 'full' : isModuleEnrolled ? 'module' : null
+//         return moduleObj
+//       })
+//     )
+
+//     res.status(200).json({
+//       message: 'Course modules fetched successfully',
+//       data: moduleProgress,
+//     })
+//   } catch (error) {
+//     next(error)
+//   }
+// }
 
 exports.checkModuleAccess = async (req, res, next) => {
   try {
