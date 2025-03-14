@@ -10,6 +10,7 @@ class CloudflareService {
   async uploadVideo(file) {
     if (!file || !file.buffer) {
       throw new Error('Invalid file input')
+      
     }
 
     try {

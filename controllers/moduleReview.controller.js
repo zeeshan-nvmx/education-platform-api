@@ -352,3 +352,93 @@ exports.getAllModuleReviews = async (req, res, next) => {
     next(error)
   }
 }
+
+exports.getAllReviewsAdmin = async (req, res, next) => {
+  try {
+    // Parse pagination parameters
+    const page = parseInt(req.query.page) || 1
+    const limit = parseInt(req.query.limit) || 10
+    const skip = (page - 1) * limit
+
+    // Parse filter parameters (optional)
+    const filters = {}
+
+    if (req.query.rating) {
+      filters.rating = parseInt(req.query.rating)
+    }
+
+    if (req.query.courseId) {
+      filters.course = req.query.courseId
+    }
+
+    if (req.query.moduleId) {
+      filters.module = req.query.moduleId
+    }
+
+    // For text search in feedback
+    if (req.query.search) {
+      filters.feedback = { $regex: req.query.search, $options: 'i' }
+    }
+
+    // Add isDeleted filter (default: show active reviews)
+    if (req.query.showDeleted === 'true') {
+      // Do nothing - show all reviews including deleted ones
+    } else {
+      filters.isDeleted = false // Default: only show active reviews
+    }
+
+    // Count total matching reviews
+    const totalReviews = await ModuleReview.countDocuments(filters)
+
+    // Get reviews with pagination and populate references
+    const reviews = await ModuleReview.find(filters)
+      .populate('user', 'firstName lastName email')
+      .populate('module', 'title')
+      .populate('course', 'title')
+      .sort({ createdAt: -1 }) // Most recent first
+      .skip(skip)
+      .limit(limit)
+
+    // Format the response data
+    const formattedReviews = reviews.map((review) => ({
+      id: review._id,
+      rating: review.rating,
+      feedback: review.feedback,
+      isDeleted: review.isDeleted,
+      user: {
+        id: review.user._id,
+        name: `${review.user.firstName} ${review.user.lastName}`,
+        email: review.user.email,
+      },
+      module: {
+        id: review.module._id,
+        title: review.module.title,
+      },
+      course: {
+        id: review.course._id,
+        title: review.course.title,
+      },
+      createdAt: review.createdAt,
+      updatedAt: review.updatedAt,
+    }))
+
+    // Return the response
+    res.status(200).json({
+      message: 'All reviews fetched successfully',
+      data: {
+        reviews: formattedReviews,
+        pagination: {
+          currentPage: page,
+          totalPages: Math.ceil(totalReviews / limit),
+          totalReviews,
+          hasNextPage: page < Math.ceil(totalReviews / limit),
+          hasPrevPage: page > 1,
+        },
+        filters: Object.keys(filters).length > 0 ? filters : 'None',
+      },
+    })
+  } catch (error) {
+    console.error('Error fetching all reviews:', error)
+    next(error)
+  }
+}

@@ -6,6 +6,7 @@ const router = express.Router()
 
 const { createUser, getUsers, deleteUser, updateUserRole } = adminController
 const { getUngradedSubmissions, getQuizAttemptById } = require('../controllers/quiz.controller')
+const { getAllReviewsAdmin } = require('../controllers/moduleReview.controller')
 
 // Non conflicting submitted quiz grading route for admins and moderators
 router.get('/quizzes/ungraded', protect, restrictTo('admin', 'subAdmin', 'moderator'), getUngradedSubmissions)
@@ -24,5 +25,9 @@ router.delete('/users/:userId', protect, restrictTo('admin', 'subAdmin'), delete
 
 // Update user role
 router.patch('/users/:userId', protect, restrictTo('admin', 'subAdmin'), updateUserRole)
+
+// REVIEW MANAGEMENT ROUTES
+// Get all reviews across all modules and courses
+router.get('/reviews', protect, restrictTo('admin', 'subAdmin', 'moderator'), getAllReviewsAdmin)
 
 module.exports = router
