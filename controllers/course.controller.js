@@ -6,6 +6,30 @@ const { uploadToS3, deleteFromS3 } = require('../utils/s3')
 const sanitizeHtml = require('sanitize-html')
 const CloudflareService = require('../utils/cloudflare')
 
+// const instructorSchema = Joi.object({
+//   name: Joi.string().required().trim(),
+//   description: Joi.string().trim(),
+//   designation: Joi.string().trim(),
+//   expertise: Joi.array().items(Joi.string().trim()),
+//   socialLinks: Joi.object({
+//     linkedin: Joi.string().allow('', null).optional(),
+//     twitter: Joi.string().allow('', null).optional(),
+//     website: Joi.string().allow('', null).optional(),
+//   }).optional(),
+//   bio: Joi.string().trim(),
+//   achievements: Joi.array().items(Joi.string()),
+// }).options({ stripUnknown: true })
+
+// const courseSchema = Joi.object({
+//   title: Joi.string().trim(),
+//   description: Joi.string().trim(),
+//   longDescription: Joi.string().trim(),
+//   category: Joi.string().trim(),
+//   price: Joi.number().min(0),
+//   featured: Joi.boolean(),
+//   instructors: Joi.array().min(1).items(instructorSchema),
+// }).options({ abortEarly: false })
+
 const instructorSchema = Joi.object({
   name: Joi.string().required().trim(),
   description: Joi.string().trim(),
@@ -208,10 +232,6 @@ async function validateQuizCompletion(userId, lessonId) {
 //       })
 //     }
 
-//     if (value.modulePrice > value.price) {
-//       return next(new AppError('Module price cannot be greater than course price', 400))
-//     }
-
 //     const existingCourse = await Course.findOne({ title: value.title })
 //     if (existingCourse) {
 //       return next(new AppError('A course with this title already exists', 400))
@@ -226,7 +246,6 @@ async function validateQuizCompletion(userId, lessonId) {
 //     }
 
 //     const instructorsWithImages = await handleInstructorImages(value.instructors, req.files?.instructorImages)
-
 //     uploadedImageKeys = uploadedImageKeys.concat(instructorsWithImages.filter((inst) => inst.imageKey).map((inst) => inst.imageKey))
 
 //     value.description = sanitizeHtml(value.description, {
@@ -259,6 +278,27 @@ exports.createCourse = async (req, res, next) => {
 
   try {
     const courseData = JSON.parse(req.body.courseData)
+
+    // Filter out null, undefined, or empty instructors before validation
+    if (courseData.instructors && Array.isArray(courseData.instructors)) {
+      courseData.instructors = courseData.instructors.filter(
+        (instructor) => instructor && typeof instructor === 'object' && Object.keys(instructor).length > 0 && instructor.name
+      )
+    }
+
+    // Check if we have at least one valid instructor
+    if (!courseData.instructors || courseData.instructors.length === 0) {
+      return res.status(400).json({
+        status: 'error',
+        errors: [
+          {
+            field: 'instructors',
+            message: 'At least one valid instructor is required',
+          },
+        ],
+      })
+    }
+
     const { error, value } = courseSchema.validate(courseData)
 
     if (error) {
@@ -424,305 +464,6 @@ exports.getPublicCoursesList = async (req, res, next) => {
     next(error)
   }
 }
-
-// exports.getCourse = async (req, res, next) => {
-//   try {
-//     if (!mongoose.Types.ObjectId.isValid(req.params.courseId)) {
-//       return next(new AppError('Invalid course ID', 400))
-//     }
-
-//     const courseId = req.params.courseId
-//     console.log(`Getting course details for course ID: ${courseId}`)
-
-//     // Check if the user is authenticated
-//     const userId = req.user?._id
-//     console.log(`User ID from request: ${userId}`)
-
-//     const course = await Course.findOne({
-//       _id: courseId,
-//     })
-//       .populate('creator', 'firstName lastName email')
-//       .populate({
-//         path: 'modules',
-//         select: 'title description order price prerequisites isAccessible dependencies',
-//         options: { sort: { order: 1 } },
-//         populate: {
-//           path: 'lessons',
-//           select: 'title description order videoUrl duration requireQuizPass completionRequirements quizSettings assets',
-//           options: { sort: { order: 1 } },
-//           populate: {
-//             path: 'quiz',
-//             select: 'title type passingScore duration maxAttempts',
-//           },
-//         },
-//       })
-//       .lean()
-
-//     if (!course) {
-//       return next(new AppError('Course not found', 404))
-//     }
-
-//     console.log(`Found course: ${course.title}`)
-
-//     // Check for authenticated user
-//     let authenticatedUser = null
-//     let enrollment = null
-
-//     if (userId) {
-//       // Fetch the full user to get enrollment data
-//       authenticatedUser = await User.findById(userId)
-//       console.log(`Found authenticated user: ${authenticatedUser?.firstName} ${authenticatedUser?.lastName}`)
-
-//       // Log the user's enrolled courses
-//       console.log(`User enrolled courses count: ${authenticatedUser?.enrolledCourses?.length || 0}`)
-
-//       // Find enrollment for this specific course
-//       if (authenticatedUser?.enrolledCourses?.length) {
-//         enrollment = authenticatedUser.enrolledCourses.find((ec) => ec.course && ec.course.toString() === courseId)
-
-//         if (enrollment) {
-//           console.log(`User has enrollment for this course. Type: ${enrollment.enrollmentType}`)
-//           console.log(`Enrolled modules count: ${enrollment.enrolledModules?.length || 0}`)
-
-//           // Log each enrolled module
-//           if (enrollment.enrolledModules?.length) {
-//             enrollment.enrolledModules.forEach((em, index) => {
-//               console.log(`Module ${index + 1}: ${em.module}`)
-//             })
-//           }
-//         } else {
-//           console.log('User does not have enrollment for this course')
-//         }
-//       }
-//     }
-
-//     // Determine roles
-//     const isCreator = authenticatedUser && course.creator && course.creator._id.toString() === authenticatedUser._id.toString()
-//     const isAdmin = authenticatedUser?.role === 'admin'
-//     console.log(`User roles - Creator: ${isCreator}, Admin: ${isAdmin}`)
-
-//     const courseDetails = {
-//       _id: course._id,
-//       title: course.title || '',
-//       description: course.description || '',
-//       longDescription: course.longDescription || '',
-//       category: course.category || '',
-//       price: course.price || 0,
-//       thumbnail: course.thumbnail || '',
-//       rating: course.rating || 0,
-//       totalStudents: course.totalStudents || 0,
-//       featured: course.featured || false,
-//       creator: course.creator
-//         ? {
-//             name: `${course.creator.firstName || ''} ${course.creator.lastName || ''}`.trim(),
-//             email: isAdmin || isCreator ? course.creator.email : undefined,
-//           }
-//         : { name: 'Unknown Creator' },
-//       instructors: Array.isArray(course.instructors)
-//         ? course.instructors.map((instructor) => ({
-//             name: instructor.name || '',
-//             description: instructor.description || '',
-//             designation: instructor.designation || '',
-//             image: instructor.image || '',
-//             expertise: Array.isArray(instructor.expertise) ? instructor.expertise : [],
-//             bio: instructor.bio || '',
-//             socialLinks: instructor.socialLinks || {},
-//           }))
-//         : [],
-//     }
-
-//     let moduleProgress = {}
-//     if (enrollment && authenticatedUser?._id) {
-//       const progress = await Progress.find({
-//         user: authenticatedUser._id,
-//         course: course._id,
-//       }).lean()
-
-//       moduleProgress = progress.reduce((acc, p) => {
-//         if (p && p.module) {
-//           acc[p.module.toString()] = p
-//         }
-//         return acc
-//       }, {})
-//     }
-
-//     const hasFullAccess = isCreator || isAdmin || (enrollment && enrollment.enrollmentType === 'full')
-//     console.log(`User has full access: ${hasFullAccess}`)
-
-//     // Create a map of enrolled module IDs for quick lookup
-//     const enrolledModuleIds = new Set()
-//     if (enrollment && Array.isArray(enrollment.enrolledModules)) {
-//       enrollment.enrolledModules.forEach((em) => {
-//         if (em && em.module) {
-//           enrolledModuleIds.add(em.module.toString())
-//         }
-//       })
-//     }
-//     console.log(`Enrolled module IDs: ${Array.from(enrolledModuleIds).join(', ')}`)
-
-//     const modules = Array.isArray(course.modules) ? course.modules : []
-//     courseDetails.modules = modules
-//       .map((module) => {
-//         if (!module) return null
-
-//         const moduleId = module._id.toString()
-//         const hasModuleAccess = hasFullAccess || enrolledModuleIds.has(moduleId)
-
-//         console.log(`Module ${moduleId} (${module.title}) - User has access: ${hasModuleAccess}`)
-
-//         const moduleData = {
-//           _id: module._id,
-//           title: module.title || '',
-//           description: module.description || '',
-//           order: module.order || 0,
-//           price: module.price || 0,
-//           totalLessons: Array.isArray(module.lessons) ? module.lessons.length : 0,
-//           isAccessible: !!module.isAccessible,
-//           prerequisites: Array.isArray(module.prerequisites) ? module.prerequisites : [],
-//         }
-
-//         const currentProgress = moduleProgress[moduleId]
-//         if (currentProgress) {
-//           moduleData.progress = {
-//             completedLessons: Array.isArray(currentProgress.completedLessons) ? currentProgress.completedLessons.length : 0,
-//             completedQuizzes: Array.isArray(currentProgress.completedQuizzes) ? currentProgress.completedQuizzes.length : 0,
-//             progress: currentProgress.progress || 0,
-//             lastAccessed: currentProgress.lastAccessed || null,
-//           }
-//         }
-
-//         if (hasModuleAccess) {
-//           const lessons = Array.isArray(module.lessons) ? module.lessons : []
-//           moduleData.lessons = lessons
-//             .map((lesson) => {
-//               if (!lesson) return null
-
-//               const lessonData = {
-//                 _id: lesson._id,
-//                 title: lesson.title || '',
-//                 description: lesson.description || '',
-//                 order: lesson.order || 0,
-//                 duration: lesson.duration || 0,
-//                 requireQuizPass: !!lesson.requireQuizPass,
-//                 hasVideo: !!lesson.videoUrl,
-//                 totalAssets: Array.isArray(lesson.assets) ? lesson.assets.length : 0,
-//                 completionRequirements: {
-//                   watchVideo: !!lesson.completionRequirements?.watchVideo,
-//                   hasRequiredAssets:
-//                     Array.isArray(lesson.completionRequirements?.downloadAssets) && lesson.completionRequirements.downloadAssets.some((asset) => asset && asset.required),
-//                   minimumTimeSpent: lesson.completionRequirements?.minimumTimeSpent || 0,
-//                 },
-//               }
-
-//               if (lesson.quiz) {
-//                 lessonData.quiz = {
-//                   title: lesson.quiz.title || '',
-//                   type: lesson.quiz.type || '',
-//                   passingScore: lesson.quiz.passingScore || 0,
-//                   duration: lesson.quiz.duration || 0,
-//                   maxAttempts: lesson.quiz.maxAttempts || 0,
-//                   settings: {
-//                     required: !!lesson.quizSettings?.required,
-//                     minimumPassingScore: lesson.quizSettings?.minimumPassingScore || 70,
-//                     blockProgress: !!lesson.quizSettings?.blockProgress,
-//                     showQuizAt: lesson.quizSettings?.showQuizAt || 'after',
-//                     minimumTimeRequired: lesson.quizSettings?.minimumTimeRequired || 0,
-//                   },
-//                 }
-//               }
-
-//               if (currentProgress) {
-//                 lessonData.progress = {
-//                   completed: Array.isArray(currentProgress.completedLessons) && currentProgress.completedLessons.includes(lesson._id),
-//                   quizCompleted: lesson.quiz && Array.isArray(currentProgress.completedQuizzes) && currentProgress.completedQuizzes.includes(lesson.quiz._id),
-//                 }
-//               }
-
-//               return lessonData
-//             })
-//             .filter(Boolean)
-//         } else {
-//           const lessons = Array.isArray(module.lessons) ? module.lessons : []
-//           moduleData.lessons = lessons
-//             .map((lesson) => {
-//               if (!lesson) return null
-//               return {
-//                 _id: lesson._id,
-//                 title: lesson.title || '',
-//                 description: lesson.description || '',
-//                 order: lesson.order || 0,
-//                 duration: lesson.duration || 0,
-//                 hasQuiz: !!lesson.quiz,
-//                 hasVideo: !!lesson.videoUrl,
-//                 totalAssets: Array.isArray(lesson.assets) ? lesson.assets.length : 0,
-//               }
-//             })
-//             .filter(Boolean)
-//         }
-
-//         return moduleData
-//       })
-//       .filter(Boolean)
-
-//     // Always include enrollment data if user is authenticated and has any enrollment
-//     if (enrollment) {
-//       console.log('Including enrollment data in response')
-
-//       // Format the enrolledModules array properly
-//       const formattedEnrolledModules = []
-
-//       if (Array.isArray(enrollment.enrolledModules)) {
-//         for (const em of enrollment.enrolledModules) {
-//           if (!em || !em.module) continue
-
-//           formattedEnrolledModules.push({
-//             module: em.module,
-//             enrolledAt: em.enrolledAt || enrollment.enrolledAt || new Date(),
-//             completedLessons: Array.isArray(em.completedLessons) ? em.completedLessons : [],
-//             completedQuizzes: Array.isArray(em.completedQuizzes) ? em.completedQuizzes : [],
-//             lastAccessed: em.lastAccessed || enrollment.enrolledAt || new Date(),
-//           })
-//         }
-//       }
-
-//       console.log(`Formatted enrolled modules count: ${formattedEnrolledModules.length}`)
-
-//       courseDetails.enrollment = {
-//         type: enrollment.enrollmentType,
-//         enrolledAt: enrollment.enrolledAt,
-//         enrolledModules: formattedEnrolledModules,
-//       }
-//     } else {
-//       console.log('No enrollment data to include')
-//     }
-
-//     courseDetails.statistics = {
-//       totalModules: courseDetails.modules.length,
-//       totalLessons: courseDetails.modules.reduce((acc, module) => acc + (Array.isArray(module.lessons) ? module.lessons.length : 0), 0),
-//       totalDuration: courseDetails.modules.reduce(
-//         (acc, module) => acc + (Array.isArray(module.lessons) ? module.lessons.reduce((sum, lesson) => sum + (lesson?.duration || 0), 0) : 0),
-//         0
-//       ),
-//       totalQuizzes: courseDetails.modules.reduce(
-//         (acc, module) => acc + (Array.isArray(module.lessons) ? module.lessons.reduce((sum, lesson) => sum + (lesson?.quiz ? 1 : 0), 0) : 0),
-//         0
-//       ),
-//     }
-
-//     const finalResponse = {
-//       message: 'Course fetched successfully',
-//       data: courseDetails,
-//     }
-
-//     // Log the enrollment part of the response before sending
-//     console.log('Enrollment in response:', JSON.stringify(finalResponse.data.enrollment))
-
-//     res.status(200).json(finalResponse)
-//   } catch (error) {
-//     console.error('Error in getCourse:', error)
-//     next(error)
-//   }
-// }
 
 exports.getAllCourses = async (req, res, next) => {
   try {
@@ -1195,11 +936,112 @@ exports.getCourse = async (req, res, next) => {
   }
 }
 
+// exports.updateCourse = async (req, res, next) => {
+//   let newUploadedImageKeys = []
+
+//   try {
+//     const courseData = JSON.parse(req.body.courseData || '{}')
+//     const { error, value } = courseSchema.validate(courseData)
+
+//     if (error) {
+//       return res.status(400).json({
+//         status: 'error',
+//         errors: error.details.map((detail) => ({
+//           field: detail.context.key,
+//           message: detail.message,
+//         })),
+//       })
+//     }
+
+//     if (Object.keys(value).length === 0 && !req.files) {
+//       return next(new AppError('No update data provided', 400))
+//     }
+
+//     const course = await Course.findById(req.params.courseId)
+//     if (!course) {
+//       return next(new AppError('Course not found', 404))
+//     }
+
+//     if (req.files?.thumbnail?.[0]) {
+//       if (course.thumbnailKey) {
+//         await deleteFromS3(course.thumbnailKey).catch(console.error)
+//       }
+//       const thumbnailKey = `course-thumbnails/${Date.now()}-${req.files.thumbnail[0].originalname}`
+//       const thumbnailUrl = await uploadToS3(req.files.thumbnail[0], thumbnailKey)
+//       value.thumbnail = thumbnailUrl
+//       value.thumbnailKey = thumbnailKey
+//       newUploadedImageKeys.push(thumbnailKey)
+//     }
+
+//     if (value.instructors) {
+//       const oldInstructorImageKeys = course.instructors.filter((inst) => inst.imageKey).map((inst) => inst.imageKey)
+
+//       const instructorsWithImages = await handleInstructorImages(value.instructors, req.files?.instructorImages)
+//       newUploadedImageKeys = newUploadedImageKeys.concat(instructorsWithImages.filter((inst) => inst.imageKey).map((inst) => inst.imageKey))
+
+//       value.instructors = instructorsWithImages
+//       await cleanupInstructorImages(oldInstructorImageKeys)
+//     }
+
+//     if (value.description) {
+//       value.description = sanitizeHtml(value.description, {
+//         allowedTags: ['b', 'i', 'em', 'strong', 'p', 'br'],
+//         allowedAttributes: {},
+//       })
+//     }
+
+//     if (value.title && value.title !== course.title) {
+//       const existingCourse = await Course.findOne({
+//         title: value.title,
+//         _id: { $ne: req.params.courseId },
+//       })
+//       if (existingCourse) {
+//         await cleanupInstructorImages(newUploadedImageKeys)
+//         return next(new AppError('A course with this title already exists', 400))
+//       }
+//     }
+
+//     const updatedCourse = await Course.findByIdAndUpdate(req.params.courseId, { ...value }, { new: true, runValidators: true }).populate(
+//       'creator',
+//       'firstName lastName email'
+//     )
+
+//     res.status(200).json({
+//       message: 'Course updated successfully',
+//       data: updatedCourse,
+//     })
+//   } catch (error) {
+//     await cleanupInstructorImages(newUploadedImageKeys)
+//     next(error)
+//   }
+// }
+
 exports.updateCourse = async (req, res, next) => {
   let newUploadedImageKeys = []
 
   try {
     const courseData = JSON.parse(req.body.courseData || '{}')
+
+    // Filter out null, undefined, or empty instructors before validation
+    if (courseData.instructors && Array.isArray(courseData.instructors)) {
+      courseData.instructors = courseData.instructors.filter(
+        (instructor) => instructor && typeof instructor === 'object' && Object.keys(instructor).length > 0 && instructor.name
+      )
+
+      // If instructors array provided but empty after filtering, this is an error
+      if (courseData.instructors.length === 0) {
+        return res.status(400).json({
+          status: 'error',
+          errors: [
+            {
+              field: 'instructors',
+              message: 'At least one valid instructor is required',
+            },
+          ],
+        })
+      }
+    }
+
     const { error, value } = courseSchema.validate(courseData)
 
     if (error) {
