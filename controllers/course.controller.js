@@ -1022,6 +1022,9 @@ exports.updateCourse = async (req, res, next) => {
   try {
     const courseData = JSON.parse(req.body.courseData || '{}')
 
+    // Default behavior is to append instructors, unless replaceInstructors is explicitly set to true
+    const isReplaceOperation = courseData.replaceInstructors === true
+
     // Filter out null, undefined, or empty instructors before validation
     if (courseData.instructors && Array.isArray(courseData.instructors)) {
       courseData.instructors = courseData.instructors.filter(
@@ -1075,13 +1078,21 @@ exports.updateCourse = async (req, res, next) => {
     }
 
     if (value.instructors) {
-      const oldInstructorImageKeys = course.instructors.filter((inst) => inst.imageKey).map((inst) => inst.imageKey)
-
+      // Get new instructors with images
       const instructorsWithImages = await handleInstructorImages(value.instructors, req.files?.instructorImages)
       newUploadedImageKeys = newUploadedImageKeys.concat(instructorsWithImages.filter((inst) => inst.imageKey).map((inst) => inst.imageKey))
 
-      value.instructors = instructorsWithImages
-      await cleanupInstructorImages(oldInstructorImageKeys)
+      // Replace existing instructors (only if explicitly requested)
+      if (isReplaceOperation) {
+        const oldInstructorImageKeys = course.instructors.filter((inst) => inst.imageKey).map((inst) => inst.imageKey)
+        value.instructors = instructorsWithImages
+        await cleanupInstructorImages(oldInstructorImageKeys)
+      }
+      // Append new instructors to existing ones (default behavior)
+      else {
+        // Combine existing instructors with new ones
+        value.instructors = [...course.instructors, ...instructorsWithImages]
+      }
     }
 
     if (value.description) {
