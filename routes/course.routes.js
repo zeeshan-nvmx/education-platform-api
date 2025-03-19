@@ -31,6 +31,9 @@ const uploadFields = upload.fields([
   { name: 'instructorImages', maxCount: 10 },
 ])
 
+// Create middleware for single instructor image upload
+const uploadInstructorImage = upload.fields([{ name: 'instructorImage', maxCount: 1 }])
+
 const {
   createCourse,
   getAllCourses,
@@ -45,6 +48,8 @@ const {
   getCourseProgress,
   getModuleProgress,
   getPublicCoursesList,
+  updateInstructor,
+  deleteInstructor,
 } = require('../controllers/course.controller')
 
 const router = express.Router()
@@ -65,6 +70,10 @@ router.get('/:courseId/modules/:moduleId/access', protect, validateMongoId, chec
 router.post('/', protect, restrictTo('admin', 'subAdmin'), uploadFields, createCourse)
 router.put('/:courseId', protect, restrictTo('admin', 'subAdmin'), validateMongoId, /* checkCourseOwnership, */ uploadFields, updateCourse)
 router.delete('/:courseId', protect, restrictTo('admin', 'subAdmin'), validateMongoId, /* checkCourseOwnership, */ deleteCourse)
+
+// Instructor routes
+router.patch('/:courseId/instructors', protect, restrictTo('admin', 'subAdmin'), validateMongoId, uploadInstructorImage, updateInstructor)
+router.delete('/:courseId/instructors', protect, restrictTo('admin', 'subAdmin'), validateMongoId, deleteInstructor)
 
 // trailer upload route
 router.post('/:courseId/trailer', protect, restrictTo('admin', 'subAdmin'), validateMongoId, uploadVideo.single('video'), uploadCourseTrailer)
@@ -90,6 +99,7 @@ module.exports = router
 // // Import module router
 // const moduleRouter = require('./module.routes')
 // const lessonRouter = require('./lesson.routes')
+// // const moduleReviewRouter = require('./moduleReview.routes')
 
 // // Configure multer for memory storage
 // const upload = multer({
@@ -130,16 +140,6 @@ module.exports = router
 
 // const router = express.Router()
 
-// // Mount module routes
-// router.use('/:courseId/modules', moduleRouter);
-
-// // // Public routes
-// // router.get('/featured', getFeaturedCourses)
-// // router.get('/public', getPublicCoursesList)
-// // router.get('/category/:category', getCoursesByCategory)
-// // router.get('/', getAllCourses)
-// // router.get('/:courseId', validateMongoId, getCourse)
-
 // // Public routes with optional authentication
 // router.get('/featured', optionalAuth, getFeaturedCourses)
 // router.get('/public', optionalAuth, getPublicCoursesList)
@@ -163,7 +163,7 @@ module.exports = router
 // // Module-related routes
 // router.get('/:courseId/modules', validateMongoId, getCourseModules)
 
-// // Forward module routes
+// // Mount module router - this will handle module routes including review routes
 // router.use('/:courseId/modules', moduleRouter)
 
 // // Forward lesson routes

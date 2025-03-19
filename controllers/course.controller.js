@@ -640,6 +640,7 @@ exports.getCourse = async (req, res, next) => {
         : { name: 'Unknown Creator' },
       instructors: Array.isArray(course.instructors)
         ? course.instructors.map((instructor) => ({
+            _id: instructor._id || '',
             name: instructor.name || '',
             description: instructor.description || '',
             designation: instructor.designation || '',
@@ -1128,6 +1129,84 @@ exports.updateCourse = async (req, res, next) => {
   }
 }
 
+exports.updateInstructor = async (req, res, next) => {
+  let newUploadedImageKeys = []
+
+  try {
+    const instructorData = JSON.parse(req.body.instructorData || '{}')
+
+    // Validate instructorId is provided
+    if (!instructorData.instructorId) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'instructorId is required to update an instructor',
+      })
+    }
+
+    // Validate instructor data using the same schema
+    const { error, value } = instructorSchema.validate(instructorData.instructor)
+
+    if (error) {
+      return res.status(400).json({
+        status: 'error',
+        errors: error.details.map((detail) => ({
+          field: detail.context.key,
+          message: detail.message,
+        })),
+      })
+    }
+
+    // Find the course
+    const course = await Course.findById(req.params.courseId)
+    if (!course) {
+      return next(new AppError('Course not found', 404))
+    }
+
+    // Find the instructor to update
+    const instructorIndex = course.instructors.findIndex((instructor) => instructor._id.toString() === instructorData.instructorId)
+
+    if (instructorIndex === -1) {
+      return next(new AppError('Instructor not found in this course', 404))
+    }
+
+    // Handle instructor image if uploaded
+    if (req.files?.instructorImage?.[0]) {
+      // Clean up old image if exists
+      if (course.instructors[instructorIndex].imageKey) {
+        await deleteFromS3(course.instructors[instructorIndex].imageKey).catch(console.error)
+      }
+
+      const imageKey = `instructor-images/${Date.now()}-${req.files.instructorImage[0].originalname}`
+      const imageUrl = await uploadToS3(req.files.instructorImage[0], imageKey)
+
+      value.imageUrl = imageUrl
+      value.imageKey = imageKey
+      newUploadedImageKeys.push(imageKey)
+    } else {
+      // Keep existing image if no new image uploaded
+      value.imageUrl = course.instructors[instructorIndex].imageUrl
+      value.imageKey = course.instructors[instructorIndex].imageKey
+    }
+
+    // Update the specific instructor in the array
+    course.instructors[instructorIndex] = {
+      _id: course.instructors[instructorIndex]._id, // Preserve the original ID
+      ...value,
+    }
+
+    // Save the updated course
+    await course.save()
+
+    res.status(200).json({
+      message: 'Instructor updated successfully',
+      data: course,
+    })
+  } catch (error) {
+    await cleanupInstructorImages(newUploadedImageKeys)
+    next(error)
+  }
+}
+
 exports.uploadCourseTrailer = async (req, res, next) => {
   try {
     // Initial validations before any operations
@@ -1276,6 +1355,60 @@ exports.deleteCourse = async (req, res, next) => {
     next(error)
   } finally {
     session.endSession()
+  }
+}
+
+exports.deleteInstructor = async (req, res, next) => {
+  try {
+    const { courseId } = req.params
+    const { instructorId } = req.body
+
+    // Validate instructorId is provided
+    if (!instructorId) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'instructorId is required to delete an instructor',
+      })
+    }
+
+    // Find the course
+    const course = await Course.findById(courseId)
+    if (!course) {
+      return next(new AppError('Course not found', 404))
+    }
+
+    // Make sure there will be at least one instructor left after deletion
+    if (course.instructors.length <= 1) {
+      return next(new AppError('Cannot delete the last instructor. Course must have at least one instructor', 400))
+    }
+
+    // Find the instructor to delete
+    const instructorIndex = course.instructors.findIndex((instructor) => instructor._id.toString() === instructorId)
+
+    if (instructorIndex === -1) {
+      return next(new AppError('Instructor not found in this course', 404))
+    }
+
+    // Store the instructor image key for cleanup if it exists
+    const instructorImageKey = course.instructors[instructorIndex].imageKey
+
+    // Remove the instructor from the array
+    course.instructors.splice(instructorIndex, 1)
+
+    // Save the updated course
+    await course.save()
+
+    // Clean up the instructor image from S3 if it exists
+    if (instructorImageKey) {
+      await deleteFromS3(instructorImageKey).catch(console.error)
+    }
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Instructor deleted successfully',
+    })
+  } catch (error) {
+    next(error)
   }
 }
 
