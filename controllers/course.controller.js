@@ -1158,55 +1158,51 @@ exports.updateInstructor = async (req, res, next) => {
 
     // Get the existing instructor data
     const existingInstructor = course.instructors[instructorIndex]
+    const existingData = existingInstructor.toObject ? existingInstructor.toObject() : { ...existingInstructor }
 
-    // Create an object combining existing data with updates
-    const updatedInstructorData = {
-      ...existingInstructor.toObject(),
-      ...instructorData.instructor,
-    }
+    // Create updated instructor data object
+    const updatedInstructor = { ...existingData }
 
-    // Validate the combined data
-    const { error, value } = instructorSchema.validate(updatedInstructorData)
-
-    if (error) {
-      return res.status(400).json({
-        status: 'error',
-        errors: error.details.map((detail) => ({
-          field: detail.context.key,
-          message: detail.message,
-        })),
+    // Update fields from request
+    if (instructorData.instructor) {
+      Object.keys(instructorData.instructor).forEach((key) => {
+        updatedInstructor[key] = instructorData.instructor[key]
       })
     }
 
     // Handle instructor image if uploaded
     if (req.files?.instructorImage?.[0]) {
-      // Try to delete old image if exists, but don't let it fail the operation
-      if (existingInstructor.imageKey) {
+      // Try to delete old image if exists
+      if (existingData.imageKey) {
         try {
-          await deleteFromS3(existingInstructor.imageKey)
+          await deleteFromS3(existingData.imageKey)
         } catch (err) {
           console.error('Error deleting old instructor image:', err)
-          // Continue with the operation even if image deletion fails
         }
       }
 
-      const imageKey = `instructor-images/${Date.now()}-${req.files.instructorImage[0].originalname}`
-      const imageUrl = await uploadToS3(req.files.instructorImage[0], imageKey)
+      // Create a guaranteed clean filename with no user input
+      const timestamp = Date.now()
+      const uniqueId = Math.random().toString(36).substring(2, 10)
+      const fileType = req.files.instructorImage[0].mimetype.split('/')[1] || 'png'
 
-      value.imageUrl = imageUrl
-      value.imageKey = imageKey
-      newUploadedImageKeys.push(imageKey)
-    } else {
-      // Keep existing image if no new image uploaded
-      value.imageUrl = existingInstructor.imageUrl
-      value.imageKey = existingInstructor.imageKey
+      // Build a completely safe key
+      const safeKey = `instructor-images/${timestamp}-${uniqueId}.${fileType}`
+
+      // Upload with our safe key
+      const imageUrl = await uploadToS3(req.files.instructorImage[0], safeKey)
+
+      // Set both fields on the instructor
+      updatedInstructor.image = imageUrl
+      updatedInstructor.imageKey = safeKey
+      newUploadedImageKeys.push(safeKey)
     }
 
-    // Preserve MongoDB _id
-    value._id = existingInstructor._id
+    // Update the instructor in the course
+    course.instructors[instructorIndex] = updatedInstructor
 
-    // Update the specific instructor in the array
-    course.instructors[instructorIndex] = value
+    // Ensure Mongoose detects the change
+    course.markModified('instructors')
 
     // Save the updated course
     await course.save()
@@ -1216,7 +1212,10 @@ exports.updateInstructor = async (req, res, next) => {
       data: course,
     })
   } catch (error) {
-    await cleanupInstructorImages(newUploadedImageKeys)
+    // Clean up any newly uploaded images on error
+    if (newUploadedImageKeys.length > 0) {
+      await Promise.all(newUploadedImageKeys.map((key) => deleteFromS3(key)))
+    }
     next(error)
   }
 }
