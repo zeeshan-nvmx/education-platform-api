@@ -1143,19 +1143,6 @@ exports.updateInstructor = async (req, res, next) => {
       })
     }
 
-    // Validate instructor data using the same schema
-    const { error, value } = instructorSchema.validate(instructorData.instructor)
-
-    if (error) {
-      return res.status(400).json({
-        status: 'error',
-        errors: error.details.map((detail) => ({
-          field: detail.context.key,
-          message: detail.message,
-        })),
-      })
-    }
-
     // Find the course
     const course = await Course.findById(req.params.courseId)
     if (!course) {
@@ -1169,11 +1156,38 @@ exports.updateInstructor = async (req, res, next) => {
       return next(new AppError('Instructor not found in this course', 404))
     }
 
+    // Get the existing instructor data
+    const existingInstructor = course.instructors[instructorIndex]
+
+    // Create an object combining existing data with updates
+    const updatedInstructorData = {
+      ...existingInstructor.toObject(),
+      ...instructorData.instructor,
+    }
+
+    // Validate the combined data
+    const { error, value } = instructorSchema.validate(updatedInstructorData)
+
+    if (error) {
+      return res.status(400).json({
+        status: 'error',
+        errors: error.details.map((detail) => ({
+          field: detail.context.key,
+          message: detail.message,
+        })),
+      })
+    }
+
     // Handle instructor image if uploaded
     if (req.files?.instructorImage?.[0]) {
-      // Clean up old image if exists
-      if (course.instructors[instructorIndex].imageKey) {
-        await deleteFromS3(course.instructors[instructorIndex].imageKey).catch(console.error)
+      // Try to delete old image if exists, but don't let it fail the operation
+      if (existingInstructor.imageKey) {
+        try {
+          await deleteFromS3(existingInstructor.imageKey)
+        } catch (err) {
+          console.error('Error deleting old instructor image:', err)
+          // Continue with the operation even if image deletion fails
+        }
       }
 
       const imageKey = `instructor-images/${Date.now()}-${req.files.instructorImage[0].originalname}`
@@ -1184,15 +1198,15 @@ exports.updateInstructor = async (req, res, next) => {
       newUploadedImageKeys.push(imageKey)
     } else {
       // Keep existing image if no new image uploaded
-      value.imageUrl = course.instructors[instructorIndex].imageUrl
-      value.imageKey = course.instructors[instructorIndex].imageKey
+      value.imageUrl = existingInstructor.imageUrl
+      value.imageKey = existingInstructor.imageKey
     }
 
+    // Preserve MongoDB _id
+    value._id = existingInstructor._id
+
     // Update the specific instructor in the array
-    course.instructors[instructorIndex] = {
-      _id: course.instructors[instructorIndex]._id, // Preserve the original ID
-      ...value,
-    }
+    course.instructors[instructorIndex] = value
 
     // Save the updated course
     await course.save()
