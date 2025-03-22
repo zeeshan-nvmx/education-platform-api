@@ -34,6 +34,12 @@ const uploadFields = upload.fields([
 // Create middleware for single instructor image upload
 const uploadInstructorImage = upload.fields([{ name: 'instructorImage', maxCount: 1 }])
 
+// Create middleware for knowledge part images
+const uploadKnowledgeImagesMiddleware = upload.fields([
+  { name: 'knowledgePartImage1', maxCount: 1 },
+  { name: 'knowledgePartImage2', maxCount: 1 },
+])
+
 const {
   createCourse,
   getAllCourses,
@@ -50,6 +56,10 @@ const {
   getPublicCoursesList,
   updateInstructor,
   deleteInstructor,
+  // New controller functions
+  updateCourseDetails,
+  uploadKnowledgeImages,
+  deleteKnowledgeImage,
 } = require('../controllers/course.controller')
 
 const router = express.Router()
@@ -75,8 +85,13 @@ router.delete('/:courseId', protect, restrictTo('admin', 'subAdmin'), validateMo
 router.patch('/:courseId/instructors', protect, restrictTo('admin', 'subAdmin'), validateMongoId, uploadInstructorImage, updateInstructor)
 router.delete('/:courseId/instructors', protect, restrictTo('admin', 'subAdmin'), validateMongoId, deleteInstructor)
 
-// trailer upload route
+// Trailer upload route
 router.post('/:courseId/trailer', protect, restrictTo('admin', 'subAdmin'), validateMongoId, uploadVideo.single('video'), uploadCourseTrailer)
+
+// New routes for course additional details
+router.put('/:courseId/details', protect, restrictTo('admin', 'subAdmin'), validateMongoId, updateCourseDetails)
+router.post('/:courseId/knowledge-images', protect, restrictTo('admin', 'subAdmin'), validateMongoId, uploadKnowledgeImagesMiddleware, uploadKnowledgeImages)
+router.delete('/:courseId/knowledge-images/:part', protect, restrictTo('admin', 'subAdmin'), validateMongoId, deleteKnowledgeImage)
 
 // Module-related routes
 router.get('/:courseId/modules', validateMongoId, getCourseModules)

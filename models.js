@@ -165,6 +165,86 @@ const instructorSchema = new mongoose.Schema(
   { _id: true }
 )
 
+// const courseSchema = new mongoose.Schema(
+//   {
+//     title: {
+//       type: String,
+//       required: true,
+//       trim: true,
+//       index: true,
+//     },
+//     description: {
+//       type: String,
+//       required: true,
+//     },
+//     longDescription: {
+//       type: String,
+//       maxLength: 50000, // 50KB limit for rich text content
+//     },
+//     category: {
+//       type: String,
+//       required: true,
+//       index: true,
+//     },
+//     thumbnail: {
+//       type: String,
+//       trim: true,
+//     },
+//     thumbnailKey: {
+//       type: String,
+//       trim: true,
+//     },
+//     price: {
+//       type: Number,
+//       required: true,
+//       index: true,
+//     },
+//     creator: {
+//       type: mongoose.Schema.Types.ObjectId,
+//       ref: 'User',
+//       required: true,
+//       index: true,
+//     },
+//     instructors: {
+//       type: [instructorSchema],
+//       validate: {
+//         validator: function (v) {
+//           return v.length > 0
+//         },
+//         message: 'Course must have at least one instructor',
+//       },
+//     },
+//     featured: {
+//       type: Boolean,
+//       default: false,
+//       index: true,
+//     },
+//     rating: {
+//       type: Number,
+//       default: 0,
+//       min: 0,
+//       max: 5,
+//     },
+//     trailerUrl: { type: String, default: null },
+//     trailerCloudflareVideoId: { type: String, default: null },
+//     trailerThumbnail: { type: String, default: null },
+//     totalStudents: {
+//       type: Number,
+//       default: 0,
+//     },
+//     isDeleted: {
+//       type: Boolean,
+//       default: false,
+//       index: true,
+//     },
+//   },
+//   {
+//     timestamps: true,
+//     toJSON: { virtuals: true },
+//     toObject: { virtuals: true },
+//   }
+// )
+
 const courseSchema = new mongoose.Schema(
   {
     title: {
@@ -232,6 +312,43 @@ const courseSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    courseOverview: {
+      type: String,
+      default: '',
+    },
+    learning: {
+      type: String,
+      default: '',
+    },
+    courseReq: {
+      type: String,
+      default: '',
+    },
+    courseBenefit: {
+      type: String,
+      default: '',
+    },
+    whyChoose: {
+      type: String,
+      default: '',
+    },
+    // Knowledge part image fields
+    knowledgePartImage1: {
+      type: String,
+      default: null,
+    },
+    knowledgePartImageKey1: {
+      type: String,
+      default: null,
+    },
+    knowledgePartImage2: {
+      type: String,
+      default: null,
+    },
+    knowledgePartImageKey2: {
+      type: String,
+      default: null,
+    },
     isDeleted: {
       type: Boolean,
       default: false,
@@ -244,6 +361,7 @@ const courseSchema = new mongoose.Schema(
     toObject: { virtuals: true },
   }
 )
+
 
 courseSchema.index({ title: 'text', description: 'text' })
 courseSchema.index({ category: 1, featured: 1 })

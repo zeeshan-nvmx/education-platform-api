@@ -546,6 +546,397 @@ exports.getAllCourses = async (req, res, next) => {
   }
 }
 
+// exports.getCourse = async (req, res, next) => {
+//   try {
+//     if (!mongoose.Types.ObjectId.isValid(req.params.courseId)) {
+//       return next(new AppError('Invalid course ID', 400))
+//     }
+
+//     const courseId = req.params.courseId
+//     console.log(`Getting course details for course ID: ${courseId}`)
+
+//     // Check if the user is authenticated
+//     const userId = req.user?._id
+//     console.log(`User ID from request: ${userId}`)
+
+//     const course = await Course.findOne({
+//       _id: courseId,
+//     })
+//       .populate('creator', 'firstName lastName email')
+//       .populate({
+//         path: 'modules',
+//         select: 'title description order price prerequisites isAccessible dependencies',
+//         options: { sort: { order: 1 } },
+//         populate: {
+//           path: 'lessons',
+//           select: 'title description order videoUrl duration requireQuizPass completionRequirements quizSettings assets',
+//           options: { sort: { order: 1 } },
+//           populate: {
+//             path: 'quiz',
+//             select: 'title type passingScore duration maxAttempts',
+//           },
+//         },
+//       })
+//       .lean()
+
+//     if (!course) {
+//       return next(new AppError('Course not found', 404))
+//     }
+
+//     console.log(`Found course: ${course.title}`)
+
+//     // Check for authenticated user and fetch enrollment data
+//     let authenticatedUser = null
+//     let enrollment = null
+
+//     if (userId) {
+//       authenticatedUser = await User.findById(userId)
+//       console.log(`Found authenticated user: ${authenticatedUser?.firstName} ${authenticatedUser?.lastName}`)
+//       console.log(`User enrolled courses count: ${authenticatedUser?.enrolledCourses?.length || 0}`)
+
+//       if (authenticatedUser?.enrolledCourses?.length) {
+//         enrollment = authenticatedUser.enrolledCourses.find((ec) => ec.course && ec.course.toString() === courseId)
+
+//         if (enrollment) {
+//           console.log(`User has enrollment for this course. Type: ${enrollment.enrollmentType}`)
+//           console.log(`Enrolled modules count: ${enrollment.enrolledModules?.length || 0}`)
+
+//           if (enrollment.enrolledModules?.length) {
+//             enrollment.enrolledModules.forEach((em, index) => {
+//               console.log(`Module ${index + 1}: ${em.module}`)
+//             })
+//           }
+//         } else {
+//           console.log('User does not have enrollment for this course')
+//         }
+//       }
+//     }
+
+//     // Determine roles (admin/creator)
+//     const isCreator = authenticatedUser && course.creator && course.creator._id.toString() === authenticatedUser._id.toString()
+//     const isAdmin = authenticatedUser?.role === 'admin'
+//     console.log(`User roles - Creator: ${isCreator}, Admin: ${isAdmin}`)
+
+//     //  Build the Course Data 
+//     const courseDetails = {
+//       _id: course._id,
+//       title: course.title || '',
+//       description: course.description || '',
+//       longDescription: course.longDescription || '',
+//       category: course.category || '',
+//       price: course.price || 0,
+//       thumbnail: course.thumbnail || '',
+//       trailerUrl: course.trailerUrl || '',
+//       trailerThumbnail: course.trailerThumbnail || '',
+//       trailerCloudflareVideoId: course.trailerCloudflareVideoId || '',
+//       rating: course.rating || 0,
+//       totalStudents: course.totalStudents || 0,
+//       featured: course.featured || false,
+//       creator: course.creator
+//         ? {
+//             name: `${course.creator.firstName || ''} ${course.creator.lastName || ''}`.trim(),
+//             email: isAdmin || isCreator ? course.creator.email : undefined, // Only show email to admin/creator
+//           }
+//         : { name: 'Unknown Creator' },
+//       instructors: Array.isArray(course.instructors)
+//         ? course.instructors.map((instructor) => ({
+//             _id: instructor._id || '',
+//             name: instructor.name || '',
+//             description: instructor.description || '',
+//             designation: instructor.designation || '',
+//             image: instructor.image || '',
+//             expertise: Array.isArray(instructor.expertise) ? instructor.expertise : [],
+//             bio: instructor.bio || '',
+//             socialLinks: instructor.socialLinks || {},
+//           }))
+//         : [],
+//     }
+
+//     // --- Fetch Overall Course Progress ---
+//     let courseProgress = {
+//       completedModules: 0,
+//       totalModules: 0,
+//       completedLessons: 0,
+//       totalLessons: 0,
+//       completedQuizzes: 0,
+//       totalQuizzes: 0, // Added to track overall quiz completion
+//       overallProgress: 0,
+//     }
+
+//     if (enrollment && userId) {
+//       const allModuleProgress = await Progress.find({
+//         user: userId,
+//         course: courseId,
+//       }).lean()
+
+//       // Aggregate progress data from all modules
+//       allModuleProgress.forEach((moduleProgress) => {
+//         courseProgress.completedLessons += moduleProgress.completedLessons.length
+//         courseProgress.completedQuizzes += moduleProgress.completedQuizzes.length
+//       })
+//     }
+
+//     // --- Determine Access Level ---
+//     const hasFullAccess = isCreator || isAdmin || (enrollment && enrollment.enrollmentType === 'full')
+//     console.log(`User has full access: ${hasFullAccess}`)
+
+//     const enrolledModuleIds = new Set()
+//     if (enrollment && Array.isArray(enrollment.enrolledModules)) {
+//       enrollment.enrolledModules.forEach((em) => {
+//         if (em && em.module) {
+//           enrolledModuleIds.add(em.module.toString())
+//         }
+//       })
+//     }
+//     console.log(`Enrolled module IDs: ${Array.from(enrolledModuleIds).join(', ')}`)
+
+//     // --- Process Modules ---
+//     const modules = Array.isArray(course.modules) ? course.modules : []
+//     courseDetails.modules = await Promise.all(
+//       modules.map(async (module) => {
+//         if (!module) return null
+
+//         const moduleId = module._id.toString()
+//         const hasModuleAccess = hasFullAccess || enrolledModuleIds.has(moduleId)
+//         console.log(`Module ${moduleId} (${module.title}) - User has access: ${hasModuleAccess}`)
+
+//         const moduleData = {
+//           _id: module._id,
+//           title: module.title || '',
+//           description: module.description || '',
+//           order: module.order || 0,
+//           price: module.price || 0,
+//           totalLessons: Array.isArray(module.lessons) ? module.lessons.length : 0,
+//           isAccessible: !!module.isAccessible,
+//           prerequisites: Array.isArray(module.prerequisites) ? module.prerequisites : [],
+//           progress: {
+//             // Initialize module progress
+//             completedLessons: 0,
+//             completedQuizzes: 0,
+//             progress: 0,
+//             lastAccessed: null,
+//           },
+//         }
+
+//         // --- Fetch Module-Specific Progress ---
+//         if (enrollment && userId) {
+//           let moduleProgress = await Progress.findOne({
+//             user: userId,
+//             course: courseId,
+//             module: moduleId,
+//           }).lean()
+
+//           // FIX: If no Progress document, check enrolledModules for completed lessons
+//           if (!moduleProgress) {
+//             const enrolledModule = enrollment.enrolledModules.find((em) => em.module.toString() === moduleId)
+//             if (enrolledModule) {
+//               moduleData.progress = {
+//                 completedLessons: enrolledModule.completedLessons.length,
+//                 completedQuizzes: enrolledModule.completedQuizzes.length,
+//                 progress: 0, // Will be calculated later
+//                 lastAccessed: enrolledModule.lastAccessed,
+//               }
+//               // Calculate progress based on completed lessons
+//               if (moduleData.totalLessons > 0) {
+//                 moduleData.progress.progress = (moduleData.progress.completedLessons / moduleData.totalLessons) * 100
+//               }
+//             }
+//           } else {
+//             moduleData.progress = {
+//               completedLessons: moduleProgress.completedLessons.length,
+//               completedQuizzes: moduleProgress.completedQuizzes.length,
+//               progress: moduleProgress.progress,
+//               lastAccessed: moduleProgress.lastAccessed,
+//             }
+//           }
+
+//           //Update course progress
+//           courseProgress.totalModules += 1
+//           if (moduleData.progress.progress === 100) {
+//             courseProgress.completedModules += 1
+//           }
+//         }
+
+//         // --- Process Lessons within the Module ---
+//         if (hasModuleAccess) {
+//           const lessons = Array.isArray(module.lessons) ? module.lessons : []
+//           moduleData.lessons = await Promise.all(
+//             lessons.map(async (lesson) => {
+//               if (!lesson) return null
+
+//               const lessonData = {
+//                 _id: lesson._id,
+//                 title: lesson.title || '',
+//                 description: lesson.description || '',
+//                 order: lesson.order || 0,
+//                 duration: lesson.duration || 0,
+//                 requireQuizPass: !!lesson.requireQuizPass,
+//                 hasVideo: !!lesson.videoUrl,
+//                 totalAssets: Array.isArray(lesson.assets) ? lesson.assets.length : 0,
+//                 completionRequirements: {
+//                   watchVideo: !!lesson.completionRequirements?.watchVideo,
+//                   hasRequiredAssets:
+//                     Array.isArray(lesson.completionRequirements?.downloadAssets) && lesson.completionRequirements.downloadAssets.some((asset) => asset && asset.required),
+//                   minimumTimeSpent: lesson.completionRequirements?.minimumTimeSpent || 0,
+//                 },
+//                 progress: {
+//                   // Initialize lesson progress
+//                   completed: false,
+//                   //quizCompleted: false, // Removed as requested
+//                 },
+//               }
+//               courseProgress.totalLessons += 1
+
+//               if (lesson.quiz) {
+//                 lessonData.quiz = {
+//                   _id: lesson.quiz._id,
+//                   title: lesson.quiz.title || '',
+//                   type: lesson.quiz.type || '',
+//                   passingScore: lesson.quiz.passingScore || 0,
+//                   duration: lesson.quiz.duration || 0,
+//                   maxAttempts: lesson.quiz.maxAttempts || 0,
+//                   settings: {
+//                     required: !!lesson.quizSettings?.required,
+//                     minimumPassingScore: lesson.quizSettings?.minimumPassingScore || 70,
+//                     blockProgress: !!lesson.quizSettings?.blockProgress,
+//                     showQuizAt: lesson.quizSettings?.showQuizAt || 'after',
+//                     minimumTimeRequired: lesson.quizSettings?.minimumTimeRequired || 0,
+//                   },
+//                   progress: {
+//                     // Initialize quiz progress
+//                     completed: false, //  <--- THIS WAS MISSING, now restored
+//                     canTake: false,
+//                     remainingAttempts: 0,
+//                   },
+//                 }
+//                 courseProgress.totalQuizzes += 1
+//               }
+
+//               // --- Fetch Lesson-Specific Progress ---
+//               if (enrollment && userId) {
+//                 // Fetch moduleProgress *INSIDE* the lesson loop
+//                 const moduleProgress = await Progress.findOne({
+//                   user: userId,
+//                   course: courseId,
+//                   module: moduleId,
+//                 }).lean()
+
+//                 const isLessonCompleted =
+//                   moduleProgress && moduleProgress.completedLessons.some((completedLessonId) => completedLessonId.toString() === lesson._id.toString())
+//                 lessonData.progress.completed = isLessonCompleted
+
+//                 if (lesson.quiz) {
+//                   const quizAttempts = await QuizAttempt.find({
+//                     quiz: lesson.quiz._id,
+//                     user: userId,
+//                   })
+//                     .sort('-startTime')
+//                     .lean()
+
+//                   const isQuizCompleted =
+//                     moduleProgress && moduleProgress.completedQuizzes.some((completedQuizId) => completedQuizId.toString() === lesson.quiz._id.toString())
+
+//                   // FIX: Set completed status here!
+//                   lessonData.quiz.progress.completed = isQuizCompleted // <---  RESTORE THIS LINE
+//                   lessonData.quiz.progress.canTake = await checkQuizRequirements(userId, lesson._id)
+//                   lessonData.quiz.progress.remainingAttempts = Math.max(lesson.quiz.maxAttempts - quizAttempts.length, 0)
+//                 }
+//               }
+
+//               return lessonData
+//             })
+//           )
+//         } else {
+//           // If no module access, still show basic lesson info (no progress)
+//           const lessons = Array.isArray(module.lessons) ? module.lessons : []
+//           moduleData.lessons = lessons.map((lesson) => {
+//             if (!lesson) return null
+//             return {
+//               _id: lesson._id,
+//               title: lesson.title || '',
+//               description: lesson.description || '',
+//               order: lesson.order || 0,
+//               duration: lesson.duration || 0,
+//               hasQuiz: !!lesson.quiz,
+//               hasVideo: !!lesson.videoUrl,
+//               totalAssets: Array.isArray(lesson.assets) ? lesson.assets.length : 0,
+//             }
+//           })
+//         }
+
+//         return moduleData
+//       })
+//     )
+
+//     // --- Add Enrollment Data ---
+//     if (enrollment) {
+//       console.log('Including enrollment data in response')
+
+//       const formattedEnrolledModules = []
+
+//       if (Array.isArray(enrollment.enrolledModules)) {
+//         for (const em of enrollment.enrolledModules) {
+//           if (!em || !em.module) continue
+
+//           formattedEnrolledModules.push({
+//             module: em.module,
+//             enrolledAt: em.enrolledAt || enrollment.enrolledAt || new Date(),
+//             completedLessons: Array.isArray(em.completedLessons) ? em.completedLessons : [],
+//             completedQuizzes: Array.isArray(em.completedQuizzes) ? em.completedQuizzes : [],
+//             lastAccessed: em.lastAccessed || enrollment.enrolledAt || new Date(),
+//           })
+//         }
+//       }
+
+//       console.log(`Formatted enrolled modules count: ${formattedEnrolledModules.length}`)
+
+//       courseDetails.enrollment = {
+//         type: enrollment.enrollmentType,
+//         enrolledAt: enrollment.enrolledAt,
+//         enrolledModules: formattedEnrolledModules,
+//       }
+//     } else {
+//       console.log('No enrollment data to include')
+//     }
+
+//     // --- Calculate Overall Course Progress ---
+//     if (enrollment && userId) {
+//       if (courseProgress.totalLessons > 0) {
+//         courseProgress.overallProgress = (courseProgress.completedLessons / courseProgress.totalLessons) * 100
+//       }
+//     }
+//     courseDetails.progress = courseProgress
+
+//     // --- Course Statistics ---
+//     courseDetails.statistics = {
+//       totalModules: courseDetails.modules.length,
+//       totalLessons: courseDetails.modules.reduce((acc, module) => acc + (Array.isArray(module.lessons) ? module.lessons.length : 0), 0),
+//       totalDuration: courseDetails.modules.reduce(
+//         (acc, module) => acc + (Array.isArray(module.lessons) ? module.lessons.reduce((sum, lesson) => sum + (lesson?.duration || 0), 0) : 0),
+//         0
+//       ),
+//       totalQuizzes: courseDetails.modules.reduce(
+//         (acc, module) => acc + (Array.isArray(module.lessons) ? module.lessons.reduce((sum, lesson) => sum + (lesson?.quiz ? 1 : 0), 0) : 0),
+//         0
+//       ),
+//     }
+
+//     const finalResponse = {
+//       message: 'Course fetched successfully',
+//       data: courseDetails,
+//     }
+
+//     // Log the enrollment part of the response
+//     console.log('Enrollment in response:', JSON.stringify(finalResponse.data.enrollment))
+//     console.log('course progress in response:', JSON.stringify(finalResponse.data.progress))
+
+//     res.status(200).json(finalResponse)
+//   } catch (error) {
+//     console.error('Error in getCourse:', error)
+//     next(error)
+//   }
+// }
+
 exports.getCourse = async (req, res, next) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.courseId)) {
@@ -617,7 +1008,7 @@ exports.getCourse = async (req, res, next) => {
     const isAdmin = authenticatedUser?.role === 'admin'
     console.log(`User roles - Creator: ${isCreator}, Admin: ${isAdmin}`)
 
-    //  Build the Course Data 
+    //  Build the Course Data
     const courseDetails = {
       _id: course._id,
       title: course.title || '',
@@ -632,6 +1023,14 @@ exports.getCourse = async (req, res, next) => {
       rating: course.rating || 0,
       totalStudents: course.totalStudents || 0,
       featured: course.featured || false,
+      // Include the newly added fields
+      courseOverview: course.courseOverview || '',
+      learning: course.learning || '',
+      courseReq: course.courseReq || '',
+      courseBenefit: course.courseBenefit || '',
+      whyChoose: course.whyChoose || '',
+      knowledgePartImage1: course.knowledgePartImage1 || null,
+      knowledgePartImage2: course.knowledgePartImage2 || null,
       creator: course.creator
         ? {
             name: `${course.creator.firstName || ''} ${course.creator.lastName || ''}`.trim(),
@@ -1839,6 +2238,335 @@ exports.getModuleProgress = async (req, res, next) => {
       },
     })
   } catch (error) {
+    next(error)
+  }
+}
+
+exports.updateCourseDetails = async (req, res, next) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.courseId)) {
+      return next(new AppError('Invalid course ID', 400))
+    }
+
+    const courseId = req.params.courseId
+
+    // Validate that the course exists
+    const course = await Course.findById(courseId)
+    if (!course) {
+      return next(new AppError('Course not found', 404))
+    }
+
+    const { courseOverview, learning, courseReq, courseBenefit, whyChoose } = req.body
+
+    // Sanitize HTML content
+    const sanitizedData = {
+      courseOverview: courseOverview ? sanitizeHtml(courseOverview) : course.courseOverview,
+      learning: learning ? sanitizeHtml(learning) : course.learning,
+      courseReq: courseReq ? sanitizeHtml(courseReq) : course.courseReq,
+      courseBenefit: courseBenefit ? sanitizeHtml(courseBenefit) : course.courseBenefit,
+      whyChoose: whyChoose ? sanitizeHtml(whyChoose) : course.whyChoose,
+    }
+
+    // Update the course with the new data
+    const updatedCourse = await Course.findByIdAndUpdate(courseId, sanitizedData, { new: true, runValidators: true })
+
+    res.status(200).json({
+      message: 'Course details updated successfully',
+      data: updatedCourse,
+    })
+  } catch (error) {
+    console.error('Error in updateCourseDetails:', error)
+    next(error)
+  }
+}
+
+// exports.uploadKnowledgeImages = async (req, res, next) => {
+//   try {
+//     console.log('Starting upload function with files:', Object.keys(req.files))
+
+//     if (!mongoose.Types.ObjectId.isValid(req.params.courseId)) {
+//       return next(new AppError('Invalid course ID', 400))
+//     }
+
+//     const courseId = req.params.courseId
+//     console.log('Course ID:', courseId)
+
+//     // Validate that the course exists
+//     const course = await Course.findById(courseId)
+//     console.log('Found course:', course ? course._id : 'No course found')
+
+//     if (!course) {
+//       return next(new AppError('Course not found', 404))
+//     }
+
+//     // Track the uploaded image keys for potential cleanup
+//     const uploadedImageKeys = []
+//     const updateData = {}
+//     console.log('Processing knowledgePartImage1...')
+
+//     // Process knowledgePartImage1
+//     if (req.files?.knowledgePartImage1?.[0]) {
+//       console.log('Found knowledgePartImage1 file:', req.files.knowledgePartImage1[0].originalname)
+
+//       try {
+//         // Delete old image if exists
+//         if (course.knowledgePartImageKey1) {
+//           console.log('Deleting old image with key:', course.knowledgePartImageKey1)
+//           await deleteFromS3(course.knowledgePartImageKey1)
+//         }
+
+//         const imageKey = `course-knowledge/${courseId}/part1-${Date.now()}-${req.files.knowledgePartImage1[0].originalname}`
+//         console.log('Generated new image key:', imageKey)
+
+//         const imageUrl = await uploadToS3(req.files.knowledgePartImage1[0], imageKey)
+//         console.log('Uploaded to S3, received URL:', imageUrl)
+
+//         uploadedImageKeys.push(imageKey)
+//         updateData.knowledgePartImage1 = imageUrl
+//         updateData.knowledgePartImageKey1 = imageKey
+//         console.log('Added image1 to updateData')
+//       } catch (uploadError) {
+//         console.error('Error processing knowledgePartImage1:', uploadError)
+//         return next(new AppError(`Error uploading image 1: ${uploadError.message}`, 500))
+//       }
+//     }
+
+//     console.log('Processing knowledgePartImage2...')
+//     // Process knowledgePartImage2
+//     if (req.files?.knowledgePartImage2?.[0]) {
+//       console.log('Found knowledgePartImage2 file:', req.files.knowledgePartImage2[0].originalname)
+
+//       try {
+//         // Delete old image if exists
+//         if (course.knowledgePartImageKey2) {
+//           console.log('Deleting old image with key:', course.knowledgePartImageKey2)
+//           await deleteFromS3(course.knowledgePartImageKey2)
+//         }
+
+//         const imageKey = `course-knowledge/${courseId}/part2-${Date.now()}-${req.files.knowledgePartImage2[0].originalname}`
+//         console.log('Generated new image key:', imageKey)
+
+//         const imageUrl = await uploadToS3(req.files.knowledgePartImage2[0], imageKey)
+//         console.log('Uploaded to S3, received URL:', imageUrl)
+
+//         uploadedImageKeys.push(imageKey)
+//         updateData.knowledgePartImage2 = imageUrl
+//         updateData.knowledgePartImageKey2 = imageKey
+//         console.log('Added image2 to updateData')
+//       } catch (uploadError) {
+//         console.error('Error processing knowledgePartImage2:', uploadError)
+//         return next(new AppError(`Error uploading image 2: ${uploadError.message}`, 500))
+//       }
+//     }
+
+//     // If no files uploaded, return error
+//     console.log('Update data length:', Object.keys(updateData).length)
+//     if (Object.keys(updateData).length === 0) {
+//       console.log('No update data was created, despite having files in request')
+//       return next(new AppError('No images provided for upload', 400))
+//     }
+
+//     console.log('Updating course with data:', updateData)
+//     // Update the course with the new image URLs
+//     const updatedCourse = await Course.findByIdAndUpdate(courseId, updateData, { new: true, runValidators: true })
+
+//     console.log('Course updated successfully')
+//     res.status(200).json({
+//       message: 'Knowledge part images uploaded successfully',
+//       data: updatedCourse,
+//     })
+//   } catch (error) {
+//     console.error('Error in uploadKnowledgeImages:', error)
+//     // Attempt to clean up any uploaded images if operation fails
+//     if (uploadedImageKeys.length > 0) {
+//       for (const key of uploadedImageKeys) {
+//         try {
+//           await deleteFromS3(key)
+//         } catch (cleanupError) {
+//           console.error('Error cleaning up uploaded image:', cleanupError)
+//         }
+//       }
+//     }
+//     next(error)
+//   }
+// }
+
+exports.uploadKnowledgeImages = async (req, res, next) => {
+  try {
+    console.log('Starting upload function with files:', Object.keys(req.files))
+
+    if (!mongoose.Types.ObjectId.isValid(req.params.courseId)) {
+      return next(new AppError('Invalid course ID', 400))
+    }
+
+    const courseId = req.params.courseId
+    console.log('Course ID:', courseId)
+
+    // Validate that the course exists
+    const course = await Course.findById(courseId)
+    console.log('Found course:', course ? course._id : 'No course found')
+
+    if (!course) {
+      return next(new AppError('Course not found', 404))
+    }
+
+    // Track the uploaded image keys for potential cleanup
+    const uploadedImageKeys = []
+    const updateData = {}
+    console.log('Processing knowledgePartImage1...')
+
+    // Process knowledgePartImage1
+    if (req.files?.knowledgePartImage1?.[0]) {
+      console.log('Found knowledgePartImage1 file:', req.files.knowledgePartImage1[0].originalname)
+
+      try {
+        // Delete old image if exists
+        if (course.knowledgePartImageKey1) {
+          console.log('Deleting old image with key:', course.knowledgePartImageKey1)
+          await deleteFromS3(course.knowledgePartImageKey1)
+        }
+
+        // Create a guaranteed clean filename with no user input
+        const timestamp = Date.now()
+        const uniqueId = Math.random().toString(36).substring(2, 10)
+        const fileType = req.files.knowledgePartImage1[0].mimetype.split('/')[1] || 'png'
+
+        // Build a completely safe key
+        const imageKey = `course-knowledge/${courseId}/part1-${timestamp}-${uniqueId}.${fileType}`
+        console.log('Generated new image key:', imageKey)
+
+        const imageUrl = await uploadToS3(req.files.knowledgePartImage1[0], imageKey)
+        console.log('Uploaded to S3, received URL:', imageUrl)
+
+        uploadedImageKeys.push(imageKey)
+        updateData.knowledgePartImage1 = imageUrl
+        updateData.knowledgePartImageKey1 = imageKey
+        console.log('Added image1 to updateData')
+      } catch (uploadError) {
+        console.error('Error processing knowledgePartImage1:', uploadError)
+        return next(new AppError(`Error uploading image 1: ${uploadError.message}`, 500))
+      }
+    }
+
+    console.log('Processing knowledgePartImage2...')
+    // Process knowledgePartImage2
+    if (req.files?.knowledgePartImage2?.[0]) {
+      console.log('Found knowledgePartImage2 file:', req.files.knowledgePartImage2[0].originalname)
+
+      try {
+        // Delete old image if exists
+        if (course.knowledgePartImageKey2) {
+          console.log('Deleting old image with key:', course.knowledgePartImageKey2)
+          await deleteFromS3(course.knowledgePartImageKey2)
+        }
+
+        // Create a guaranteed clean filename with no user input
+        const timestamp = Date.now()
+        const uniqueId = Math.random().toString(36).substring(2, 10)
+        const fileType = req.files.knowledgePartImage2[0].mimetype.split('/')[1] || 'png'
+
+        // Build a completely safe key
+        const imageKey = `course-knowledge/${courseId}/part2-${timestamp}-${uniqueId}.${fileType}`
+        console.log('Generated new image key:', imageKey)
+
+        const imageUrl = await uploadToS3(req.files.knowledgePartImage2[0], imageKey)
+        console.log('Uploaded to S3, received URL:', imageUrl)
+
+        uploadedImageKeys.push(imageKey)
+        updateData.knowledgePartImage2 = imageUrl
+        updateData.knowledgePartImageKey2 = imageKey
+        console.log('Added image2 to updateData')
+      } catch (uploadError) {
+        console.error('Error processing knowledgePartImage2:', uploadError)
+        return next(new AppError(`Error uploading image 2: ${uploadError.message}`, 500))
+      }
+    }
+
+    // If no files uploaded, return error
+    console.log('Update data length:', Object.keys(updateData).length)
+    if (Object.keys(updateData).length === 0) {
+      console.log('No update data was created, despite having files in request')
+      return next(new AppError('No images provided for upload', 400))
+    }
+
+    console.log('Updating course with data:', updateData)
+    // Update the course with the new image URLs
+    const updatedCourse = await Course.findByIdAndUpdate(courseId, updateData, { new: true, runValidators: true })
+
+    console.log('Course updated successfully')
+    res.status(200).json({
+      message: 'Knowledge part images uploaded successfully',
+      data: updatedCourse,
+    })
+  } catch (error) {
+    console.error('Error in uploadKnowledgeImages:', error)
+    // Attempt to clean up any uploaded images if operation fails
+    if (uploadedImageKeys.length > 0) {
+      for (const key of uploadedImageKeys) {
+        try {
+          await deleteFromS3(key)
+        } catch (cleanupError) {
+          console.error('Error cleaning up uploaded image:', cleanupError)
+        }
+      }
+    }
+    next(error)
+  }
+}
+
+exports.deleteKnowledgeImage = async (req, res, next) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.courseId)) {
+      return next(new AppError('Invalid course ID', 400))
+    }
+
+    const courseId = req.params.courseId
+    const { part } = req.params
+    
+    if (part !== '1' && part !== '2') {
+      return next(new AppError('Invalid part number. Must be 1 or 2', 400))
+    }
+
+    // Validate that the course exists
+    const course = await Course.findById(courseId)
+    if (!course) {
+      return next(new AppError('Course not found', 404))
+    }
+
+    const updateData = {}
+    
+    // Delete the image based on the part number
+    if (part === '1') {
+      if (course.knowledgePartImageKey1) {
+        await deleteFromS3(course.knowledgePartImageKey1)
+        updateData.knowledgePartImage1 = null
+        updateData.knowledgePartImageKey1 = null
+      } else {
+        return next(new AppError('No image found for knowledge part 1', 404))
+      }
+    } else { // part === '2'
+      if (course.knowledgePartImageKey2) {
+        await deleteFromS3(course.knowledgePartImageKey2)
+        updateData.knowledgePartImage2 = null
+        updateData.knowledgePartImageKey2 = null
+      } else {
+        return next(new AppError('No image found for knowledge part 2', 404))
+      }
+    }
+
+    // Update the course to remove the image references
+    const updatedCourse = await Course.findByIdAndUpdate(
+      courseId,
+      updateData,
+      { new: true, runValidators: true }
+    )
+
+    res.status(200).json({
+      message: `Knowledge part ${part} image deleted successfully`,
+      data: updatedCourse
+    })
+  } catch (error) {
+    console.error('Error in deleteKnowledgeImage:', error)
     next(error)
   }
 }
