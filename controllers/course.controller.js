@@ -2242,44 +2242,6 @@ exports.getModuleProgress = async (req, res, next) => {
   }
 }
 
-// exports.updateCourseDetails = async (req, res, next) => {
-//   try {
-//     if (!mongoose.Types.ObjectId.isValid(req.params.courseId)) {
-//       return next(new AppError('Invalid course ID', 400))
-//     }
-
-//     const courseId = req.params.courseId
-
-//     // Validate that the course exists
-//     const course = await Course.findById(courseId)
-//     if (!course) {
-//       return next(new AppError('Course not found', 404))
-//     }
-
-//     const { courseOverview, learning, courseReq, courseBenefit, whyChoose } = req.body
-
-//     // Sanitize HTML content
-//     const sanitizedData = {
-//       courseOverview: courseOverview ? sanitizeHtml(courseOverview) : course.courseOverview,
-//       learning: learning ? sanitizeHtml(learning) : course.learning,
-//       courseReq: courseReq ? sanitizeHtml(courseReq) : course.courseReq,
-//       courseBenefit: courseBenefit ? sanitizeHtml(courseBenefit) : course.courseBenefit,
-//       whyChoose: whyChoose ? sanitizeHtml(whyChoose) : course.whyChoose,
-//     }
-
-//     // Update the course with the new data
-//     const updatedCourse = await Course.findByIdAndUpdate(courseId, sanitizedData, { new: true, runValidators: true })
-
-//     res.status(200).json({
-//       message: 'Course details updated successfully',
-//       data: updatedCourse,
-//     })
-//   } catch (error) {
-//     console.error('Error in updateCourseDetails:', error)
-//     next(error)
-//   }
-// }
-
 exports.updateCourseDetails = async (req, res, next) => {
   try {
     console.log('Request body:', req.body)
@@ -2397,7 +2359,13 @@ exports.updateCourseDetails = async (req, res, next) => {
 //           await deleteFromS3(course.knowledgePartImageKey1)
 //         }
 
-//         const imageKey = `course-knowledge/${courseId}/part1-${Date.now()}-${req.files.knowledgePartImage1[0].originalname}`
+//         // Create a guaranteed clean filename with no user input
+//         const timestamp = Date.now()
+//         const uniqueId = Math.random().toString(36).substring(2, 10)
+//         const fileType = req.files.knowledgePartImage1[0].mimetype.split('/')[1] || 'png'
+
+//         // Build a completely safe key
+//         const imageKey = `course-knowledge/${courseId}/part1-${timestamp}-${uniqueId}.${fileType}`
 //         console.log('Generated new image key:', imageKey)
 
 //         const imageUrl = await uploadToS3(req.files.knowledgePartImage1[0], imageKey)
@@ -2425,7 +2393,13 @@ exports.updateCourseDetails = async (req, res, next) => {
 //           await deleteFromS3(course.knowledgePartImageKey2)
 //         }
 
-//         const imageKey = `course-knowledge/${courseId}/part2-${Date.now()}-${req.files.knowledgePartImage2[0].originalname}`
+//         // Create a guaranteed clean filename with no user input
+//         const timestamp = Date.now()
+//         const uniqueId = Math.random().toString(36).substring(2, 10)
+//         const fileType = req.files.knowledgePartImage2[0].mimetype.split('/')[1] || 'png'
+
+//         // Build a completely safe key
+//         const imageKey = `course-knowledge/${courseId}/part2-${timestamp}-${uniqueId}.${fileType}`
 //         console.log('Generated new image key:', imageKey)
 
 //         const imageUrl = await uploadToS3(req.files.knowledgePartImage2[0], imageKey)
@@ -2473,6 +2447,63 @@ exports.updateCourseDetails = async (req, res, next) => {
 //   }
 // }
 
+// exports.deleteKnowledgeImage = async (req, res, next) => {
+//   try {
+//     if (!mongoose.Types.ObjectId.isValid(req.params.courseId)) {
+//       return next(new AppError('Invalid course ID', 400))
+//     }
+
+//     const courseId = req.params.courseId
+//     const { part } = req.params
+    
+//     if (part !== '1' && part !== '2') {
+//       return next(new AppError('Invalid part number. Must be 1 or 2', 400))
+//     }
+
+//     // Validate that the course exists
+//     const course = await Course.findById(courseId)
+//     if (!course) {
+//       return next(new AppError('Course not found', 404))
+//     }
+
+//     const updateData = {}
+    
+//     // Delete the image based on the part number
+//     if (part === '1') {
+//       if (course.knowledgePartImageKey1) {
+//         await deleteFromS3(course.knowledgePartImageKey1)
+//         updateData.knowledgePartImage1 = null
+//         updateData.knowledgePartImageKey1 = null
+//       } else {
+//         return next(new AppError('No image found for knowledge part 1', 404))
+//       }
+//     } else { // part === '2'
+//       if (course.knowledgePartImageKey2) {
+//         await deleteFromS3(course.knowledgePartImageKey2)
+//         updateData.knowledgePartImage2 = null
+//         updateData.knowledgePartImageKey2 = null
+//       } else {
+//         return next(new AppError('No image found for knowledge part 2', 404))
+//       }
+//     }
+
+//     // Update the course to remove the image references
+//     const updatedCourse = await Course.findByIdAndUpdate(
+//       courseId,
+//       updateData,
+//       { new: true, runValidators: true }
+//     )
+
+//     res.status(200).json({
+//       message: `Knowledge part ${part} image deleted successfully`,
+//       data: updatedCourse
+//     })
+//   } catch (error) {
+//     console.error('Error in deleteKnowledgeImage:', error)
+//     next(error)
+//   }
+// }
+
 exports.uploadKnowledgeImages = async (req, res, next) => {
   try {
     console.log('Starting upload function with files:', Object.keys(req.files))
@@ -2495,9 +2526,9 @@ exports.uploadKnowledgeImages = async (req, res, next) => {
     // Track the uploaded image keys for potential cleanup
     const uploadedImageKeys = []
     const updateData = {}
-    console.log('Processing knowledgePartImage1...')
 
     // Process knowledgePartImage1
+    console.log('Processing knowledgePartImage1...')
     if (req.files?.knowledgePartImage1?.[0]) {
       console.log('Found knowledgePartImage1 file:', req.files.knowledgePartImage1[0].originalname)
 
@@ -2530,8 +2561,8 @@ exports.uploadKnowledgeImages = async (req, res, next) => {
       }
     }
 
-    console.log('Processing knowledgePartImage2...')
     // Process knowledgePartImage2
+    console.log('Processing knowledgePartImage2...')
     if (req.files?.knowledgePartImage2?.[0]) {
       console.log('Found knowledgePartImage2 file:', req.files.knowledgePartImage2[0].originalname)
 
@@ -2561,6 +2592,40 @@ exports.uploadKnowledgeImages = async (req, res, next) => {
       } catch (uploadError) {
         console.error('Error processing knowledgePartImage2:', uploadError)
         return next(new AppError(`Error uploading image 2: ${uploadError.message}`, 500))
+      }
+    }
+
+    // Process knowledgePartImage3
+    console.log('Processing knowledgePartImage3...')
+    if (req.files?.knowledgePartImage3?.[0]) {
+      console.log('Found knowledgePartImage3 file:', req.files.knowledgePartImage3[0].originalname)
+
+      try {
+        // Delete old image if exists
+        if (course.knowledgePartImageKey3) {
+          console.log('Deleting old image with key:', course.knowledgePartImageKey3)
+          await deleteFromS3(course.knowledgePartImageKey3)
+        }
+
+        // Create a guaranteed clean filename with no user input
+        const timestamp = Date.now()
+        const uniqueId = Math.random().toString(36).substring(2, 10)
+        const fileType = req.files.knowledgePartImage3[0].mimetype.split('/')[1] || 'png'
+
+        // Build a completely safe key
+        const imageKey = `course-knowledge/${courseId}/part3-${timestamp}-${uniqueId}.${fileType}`
+        console.log('Generated new image key:', imageKey)
+
+        const imageUrl = await uploadToS3(req.files.knowledgePartImage3[0], imageKey)
+        console.log('Uploaded to S3, received URL:', imageUrl)
+
+        uploadedImageKeys.push(imageKey)
+        updateData.knowledgePartImage3 = imageUrl
+        updateData.knowledgePartImageKey3 = imageKey
+        console.log('Added image3 to updateData')
+      } catch (uploadError) {
+        console.error('Error processing knowledgePartImage3:', uploadError)
+        return next(new AppError(`Error uploading image 3: ${uploadError.message}`, 500))
       }
     }
 
@@ -2604,9 +2669,9 @@ exports.deleteKnowledgeImage = async (req, res, next) => {
 
     const courseId = req.params.courseId
     const { part } = req.params
-    
-    if (part !== '1' && part !== '2') {
-      return next(new AppError('Invalid part number. Must be 1 or 2', 400))
+
+    if (part !== '1' && part !== '2' && part !== '3') {
+      return next(new AppError('Invalid part number. Must be 1, 2, or 3', 400))
     }
 
     // Validate that the course exists
@@ -2616,7 +2681,7 @@ exports.deleteKnowledgeImage = async (req, res, next) => {
     }
 
     const updateData = {}
-    
+
     // Delete the image based on the part number
     if (part === '1') {
       if (course.knowledgePartImageKey1) {
@@ -2626,7 +2691,7 @@ exports.deleteKnowledgeImage = async (req, res, next) => {
       } else {
         return next(new AppError('No image found for knowledge part 1', 404))
       }
-    } else { // part === '2'
+    } else if (part === '2') {
       if (course.knowledgePartImageKey2) {
         await deleteFromS3(course.knowledgePartImageKey2)
         updateData.knowledgePartImage2 = null
@@ -2634,18 +2699,23 @@ exports.deleteKnowledgeImage = async (req, res, next) => {
       } else {
         return next(new AppError('No image found for knowledge part 2', 404))
       }
+    } else {
+      // part === '3'
+      if (course.knowledgePartImageKey3) {
+        await deleteFromS3(course.knowledgePartImageKey3)
+        updateData.knowledgePartImage3 = null
+        updateData.knowledgePartImageKey3 = null
+      } else {
+        return next(new AppError('No image found for knowledge part 3', 404))
+      }
     }
 
     // Update the course to remove the image references
-    const updatedCourse = await Course.findByIdAndUpdate(
-      courseId,
-      updateData,
-      { new: true, runValidators: true }
-    )
+    const updatedCourse = await Course.findByIdAndUpdate(courseId, updateData, { new: true, runValidators: true })
 
     res.status(200).json({
       message: `Knowledge part ${part} image deleted successfully`,
-      data: updatedCourse
+      data: updatedCourse,
     })
   } catch (error) {
     console.error('Error in deleteKnowledgeImage:', error)

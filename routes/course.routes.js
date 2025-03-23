@@ -40,6 +40,7 @@ const uploadInstructorImage = upload.fields([{ name: 'instructorImage', maxCount
 const uploadKnowledgeImagesMiddleware = upload.fields([
   { name: 'knowledgePartImage1', maxCount: 1 },
   { name: 'knowledgePartImage2', maxCount: 1 },
+  { name: 'knowledgePartImage3', maxCount: 1 },
 ])
 
 const {

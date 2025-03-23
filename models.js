@@ -354,6 +354,14 @@ const courseSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    knowledgePartImage3: {
+      type: String,
+      default: null,
+    },
+    knowledgePartImageKey3: {
+      type: String,
+      default: null,
+    },
     isDeleted: {
       type: Boolean,
       default: false,
