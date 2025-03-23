@@ -2296,29 +2296,29 @@ exports.updateCourseDetails = async (req, res, next) => {
 
     const { courseOverview, learning, courseReq, courseBenefit, whyChoose } = req.body
 
-    // Create update data object
-    const updateData = {}
+    // // Create update data object
+    // const updateData = {}
 
-    // Process each field - always update if provided (including empty strings)
-    if (courseOverview !== undefined) {
-      updateData.courseOverview = courseOverview === '' ? '' : sanitizeHtml(courseOverview)
-    }
+    // // Process each field - always update if provided (including empty strings)
+    // if (courseOverview !== undefined) {
+    //   updateData.courseOverview = courseOverview === '' ? '' : sanitizeHtml(courseOverview)
+    // }
 
-    if (learning !== undefined) {
-      updateData.learning = learning === '' ? '' : sanitizeHtml(learning)
-    }
+    // if (learning !== undefined) {
+    //   updateData.learning = learning === '' ? '' : sanitizeHtml(learning)
+    // }
 
-    if (courseReq !== undefined) {
-      updateData.courseReq = courseReq === '' ? '' : sanitizeHtml(courseReq)
-    }
+    // if (courseReq !== undefined) {
+    //   updateData.courseReq = courseReq === '' ? '' : sanitizeHtml(courseReq)
+    // }
 
-    if (courseBenefit !== undefined) {
-      updateData.courseBenefit = courseBenefit === '' ? '' : sanitizeHtml(courseBenefit)
-    }
+    // if (courseBenefit !== undefined) {
+    //   updateData.courseBenefit = courseBenefit === '' ? '' : sanitizeHtml(courseBenefit)
+    // }
 
-    if (whyChoose !== undefined) {
-      updateData.whyChoose = whyChoose === '' ? '' : sanitizeHtml(whyChoose)
-    }
+    // if (whyChoose !== undefined) {
+    //   updateData.whyChoose = whyChoose === '' ? '' : sanitizeHtml(whyChoose)
+    // }
 
     // If no fields were provided, return an error
     if (Object.keys(updateData).length === 0) {
