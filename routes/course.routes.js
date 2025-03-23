@@ -25,6 +25,8 @@ const upload = multer({
   },
 })
 
+const parseFormData = multer().none()
+
 // Create middleware to handle multiple file uploads
 const uploadFields = upload.fields([
   { name: 'thumbnail', maxCount: 1 },
@@ -89,7 +91,7 @@ router.delete('/:courseId/instructors', protect, restrictTo('admin', 'subAdmin')
 router.post('/:courseId/trailer', protect, restrictTo('admin', 'subAdmin'), validateMongoId, uploadVideo.single('video'), uploadCourseTrailer)
 
 // New routes for course additional details
-router.put('/:courseId/details', protect, restrictTo('admin', 'subAdmin'), validateMongoId, updateCourseDetails)
+router.put('/:courseId/details', protect, restrictTo('admin', 'subAdmin'), validateMongoId, parseFormData, updateCourseDetails)
 router.post('/:courseId/knowledge-images', protect, restrictTo('admin', 'subAdmin'), validateMongoId, uploadKnowledgeImagesMiddleware, uploadKnowledgeImages)
 router.delete('/:courseId/knowledge-images/:part', protect, restrictTo('admin', 'subAdmin'), validateMongoId, deleteKnowledgeImage)
 

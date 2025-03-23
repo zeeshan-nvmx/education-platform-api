@@ -2282,11 +2282,14 @@ exports.getModuleProgress = async (req, res, next) => {
 
 exports.updateCourseDetails = async (req, res, next) => {
   try {
+    console.log('Request body:', req.body)
+
     if (!mongoose.Types.ObjectId.isValid(req.params.courseId)) {
       return next(new AppError('Invalid course ID', 400))
     }
 
     const courseId = req.params.courseId
+    console.log('Course ID:', courseId)
 
     // Validate that the course exists
     const course = await Course.findById(courseId)
@@ -2294,31 +2297,52 @@ exports.updateCourseDetails = async (req, res, next) => {
       return next(new AppError('Course not found', 404))
     }
 
-    const { courseOverview, learning, courseReq, courseBenefit, whyChoose } = req.body
+    // Parse the courseInfo object from form data
+    let courseInfo
+    try {
+      console.log('courseInfo from request:', req.body.courseInfo)
+      courseInfo = JSON.parse(req.body.courseInfo || '{}')
+      console.log('Parsed courseInfo:', courseInfo)
+    } catch (err) {
+      console.error('Error parsing courseInfo:', err)
+      return next(new AppError('Invalid courseInfo format. Expected valid JSON.', 400))
+    }
 
-    // // Create update data object
-    // const updateData = {}
+    const { courseOverview, learning, courseReq, courseBenefit, whyChoose } = courseInfo
 
-    // // Process each field - always update if provided (including empty strings)
-    // if (courseOverview !== undefined) {
-    //   updateData.courseOverview = courseOverview === '' ? '' : sanitizeHtml(courseOverview)
-    // }
+    console.log('Extracted fields:', {
+      courseOverview,
+      learning,
+      courseReq,
+      courseBenefit,
+      whyChoose,
+    })
 
-    // if (learning !== undefined) {
-    //   updateData.learning = learning === '' ? '' : sanitizeHtml(learning)
-    // }
+    // Create update data object
+    const updateData = {}
 
-    // if (courseReq !== undefined) {
-    //   updateData.courseReq = courseReq === '' ? '' : sanitizeHtml(courseReq)
-    // }
+    // Process each field - always update if provided (including empty strings)
+    if (courseOverview !== undefined) {
+      updateData.courseOverview = courseOverview === '' ? '' : sanitizeHtml(courseOverview)
+    }
 
-    // if (courseBenefit !== undefined) {
-    //   updateData.courseBenefit = courseBenefit === '' ? '' : sanitizeHtml(courseBenefit)
-    // }
+    if (learning !== undefined) {
+      updateData.learning = learning === '' ? '' : sanitizeHtml(learning)
+    }
 
-    // if (whyChoose !== undefined) {
-    //   updateData.whyChoose = whyChoose === '' ? '' : sanitizeHtml(whyChoose)
-    // }
+    if (courseReq !== undefined) {
+      updateData.courseReq = courseReq === '' ? '' : sanitizeHtml(courseReq)
+    }
+
+    if (courseBenefit !== undefined) {
+      updateData.courseBenefit = courseBenefit === '' ? '' : sanitizeHtml(courseBenefit)
+    }
+
+    if (whyChoose !== undefined) {
+      updateData.whyChoose = whyChoose === '' ? '' : sanitizeHtml(whyChoose)
+    }
+
+    console.log('Update data:', updateData)
 
     // If no fields were provided, return an error
     if (Object.keys(updateData).length === 0) {
