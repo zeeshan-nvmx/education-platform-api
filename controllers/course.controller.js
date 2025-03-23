@@ -2242,6 +2242,44 @@ exports.getModuleProgress = async (req, res, next) => {
   }
 }
 
+// exports.updateCourseDetails = async (req, res, next) => {
+//   try {
+//     if (!mongoose.Types.ObjectId.isValid(req.params.courseId)) {
+//       return next(new AppError('Invalid course ID', 400))
+//     }
+
+//     const courseId = req.params.courseId
+
+//     // Validate that the course exists
+//     const course = await Course.findById(courseId)
+//     if (!course) {
+//       return next(new AppError('Course not found', 404))
+//     }
+
+//     const { courseOverview, learning, courseReq, courseBenefit, whyChoose } = req.body
+
+//     // Sanitize HTML content
+//     const sanitizedData = {
+//       courseOverview: courseOverview ? sanitizeHtml(courseOverview) : course.courseOverview,
+//       learning: learning ? sanitizeHtml(learning) : course.learning,
+//       courseReq: courseReq ? sanitizeHtml(courseReq) : course.courseReq,
+//       courseBenefit: courseBenefit ? sanitizeHtml(courseBenefit) : course.courseBenefit,
+//       whyChoose: whyChoose ? sanitizeHtml(whyChoose) : course.whyChoose,
+//     }
+
+//     // Update the course with the new data
+//     const updatedCourse = await Course.findByIdAndUpdate(courseId, sanitizedData, { new: true, runValidators: true })
+
+//     res.status(200).json({
+//       message: 'Course details updated successfully',
+//       data: updatedCourse,
+//     })
+//   } catch (error) {
+//     console.error('Error in updateCourseDetails:', error)
+//     next(error)
+//   }
+// }
+
 exports.updateCourseDetails = async (req, res, next) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.courseId)) {
@@ -2258,17 +2296,37 @@ exports.updateCourseDetails = async (req, res, next) => {
 
     const { courseOverview, learning, courseReq, courseBenefit, whyChoose } = req.body
 
-    // Sanitize HTML content
-    const sanitizedData = {
-      courseOverview: courseOverview ? sanitizeHtml(courseOverview) : course.courseOverview,
-      learning: learning ? sanitizeHtml(learning) : course.learning,
-      courseReq: courseReq ? sanitizeHtml(courseReq) : course.courseReq,
-      courseBenefit: courseBenefit ? sanitizeHtml(courseBenefit) : course.courseBenefit,
-      whyChoose: whyChoose ? sanitizeHtml(whyChoose) : course.whyChoose,
+    // Create update data object
+    const updateData = {}
+
+    // Process each field - always update if provided (including empty strings)
+    if (courseOverview !== undefined) {
+      updateData.courseOverview = courseOverview === '' ? '' : sanitizeHtml(courseOverview)
+    }
+
+    if (learning !== undefined) {
+      updateData.learning = learning === '' ? '' : sanitizeHtml(learning)
+    }
+
+    if (courseReq !== undefined) {
+      updateData.courseReq = courseReq === '' ? '' : sanitizeHtml(courseReq)
+    }
+
+    if (courseBenefit !== undefined) {
+      updateData.courseBenefit = courseBenefit === '' ? '' : sanitizeHtml(courseBenefit)
+    }
+
+    if (whyChoose !== undefined) {
+      updateData.whyChoose = whyChoose === '' ? '' : sanitizeHtml(whyChoose)
+    }
+
+    // If no fields were provided, return an error
+    if (Object.keys(updateData).length === 0) {
+      return next(new AppError('No fields provided for update', 400))
     }
 
     // Update the course with the new data
-    const updatedCourse = await Course.findByIdAndUpdate(courseId, sanitizedData, { new: true, runValidators: true })
+    const updatedCourse = await Course.findByIdAndUpdate(courseId, updateData, { new: true, runValidators: true })
 
     res.status(200).json({
       message: 'Course details updated successfully',
