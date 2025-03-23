@@ -1031,6 +1031,7 @@ exports.getCourse = async (req, res, next) => {
       whyChoose: course.whyChoose || '',
       knowledgePartImage1: course.knowledgePartImage1 || null,
       knowledgePartImage2: course.knowledgePartImage2 || null,
+      knowledgePartImage3: course.knowledgePartImage3 || null,
       creator: course.creator
         ? {
             name: `${course.creator.firstName || ''} ${course.creator.lastName || ''}`.trim(),
