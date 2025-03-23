@@ -315,22 +315,27 @@ const courseSchema = new mongoose.Schema(
     courseOverview: {
       type: String,
       default: '',
+      maxLength: 50000,
     },
     learning: {
       type: String,
       default: '',
+      maxLength: 50000,
     },
     courseReq: {
       type: String,
       default: '',
+      maxLength: 50000,
     },
     courseBenefit: {
       type: String,
       default: '',
+      maxLength: 50000,
     },
     whyChoose: {
       type: String,
       default: '',
+      maxLength: 50000,
     },
     // Knowledge part image fields
     knowledgePartImage1: {
