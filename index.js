@@ -17,9 +17,18 @@ const testEnrollmentRouter = require('./routes/testEnrollment.routes')
 const app = express()
 let server
 
+const corsOptions = {
+  origin: ['https://esgeducation.netlify.app', 'http://localhost:3000', 'https://ungcnbacademy.org'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  credentials: true, 
+  preflightContinue: false,
+  optionsSuccessStatus: 204,
+}
+
 // Global Middleware
 app.set('trust proxy', 1)
-app.use(cors())
+app.use(cors(corsOptions))
 app.use(helmet())
 if (process.env.NODE_ENV === 'development') {
   app.use(morgan('dev'))
