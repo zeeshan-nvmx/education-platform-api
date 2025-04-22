@@ -18,7 +18,7 @@ const app = express()
 let server
 
 const corsOptions = {
-  origin: ['https://esgeducation.netlify.app', 'http://localhost:3000', 'https://ungcnbacademy.org'],
+  origin: ['https://esgeducation.netlify.app', 'http://localhost:3000', 'https://ungcnbacademy.org', 'www.ungcnbacademy.org', 'https://www.ungcnbacademy.org'],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   credentials: true, 
