@@ -54,7 +54,7 @@ exports.uploadVideo = multer({
   storage,
   fileFilter: videoFileFilter,
   limits: {
-    fileSize: 1000 * 1024 * 1024, // 1000MB limit
+    fileSize: 5000 * 1024 * 1024, // 5GB limit
   },
 })
 
