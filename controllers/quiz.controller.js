@@ -2,6 +2,66 @@ const mongoose = require('mongoose')
 const { Quiz, QuizAttempt, Lesson, Progress, User, LessonProgress, Module } = require('../models')
 const { AppError } = require('../utils/errors')
 
+//Helper functions
+async function hasPreviousLessonQuizPassed(userId, moduleId, currentLessonId) {
+  try {
+    // Get the current lesson to find its order
+    const currentLesson = await Lesson.findOne({
+      _id: currentLessonId,
+      isDeleted: false,
+    }).select('order')
+
+    if (!currentLesson) {
+      console.log('Current lesson not found, quiz access granted')
+      return true // If we can't find current lesson, don't block (safer to debug)
+    }
+
+    // Find the immediate previous lesson in the module by order
+    const previousLesson = await Lesson.findOne({
+      module: moduleId,
+      order: { $lt: currentLesson.order },
+      isDeleted: false,
+    })
+      .sort({ order: -1 })
+      .populate('quiz')
+
+    // If there's no previous lesson, quiz is automatically takeable
+    if (!previousLesson) {
+      console.log('No previous lesson found, quiz access granted')
+      return true
+    }
+
+    // If previous lesson exists but doesn't have a quiz, quiz is automatically takeable
+    if (!previousLesson.quiz) {
+      console.log('Previous lesson has no quiz, quiz access granted')
+      return true
+    }
+
+    console.log(`Previous lesson (${previousLesson.title}) has quiz ${previousLesson.quiz._id}, checking if passed`)
+
+    // Get user's progress in this module
+    const progress = await Progress.findOne({
+      user: userId,
+      module: moduleId,
+    })
+
+    // If no progress record found, the previous quiz hasn't been passed
+    if (!progress) {
+      console.log('No progress record found, previous quiz not passed')
+      return false
+    }
+
+    // Check if the previous lesson's quiz is in the completedQuizzes array
+    const previousQuizPassed = progress.completedQuizzes.some((quizId) => quizId.toString() === previousLesson.quiz._id.toString())
+
+    console.log(`Previous quiz passed: ${previousQuizPassed}`)
+    return previousQuizPassed
+  } catch (error) {
+    console.error('Error checking previous lesson quiz:', error)
+    return false // Default to not allowing on error for safety
+  }
+}
+
 exports.createQuiz = async (req, res, next) => {
   const session = await mongoose.startSession()
   session.startTransaction()
@@ -245,6 +305,157 @@ exports.deleteQuiz = async (req, res, next) => {
   }
 }
 
+// exports.getQuiz = async (req, res, next) => {
+//   try {
+//     const { courseId, moduleId, lessonId } = req.params
+//     const userId = req.user._id
+
+//     // Check user has access to this module/course - simplified check
+//     const user = await User.findById(userId).select('+role +enrolledCourses').lean()
+
+//     if (!user) {
+//       return next(new AppError('User not found', 404))
+//     }
+
+//     const isAdmin = ['admin', 'subAdmin', 'moderator'].includes(user.role)
+//     let hasAccess = isAdmin
+
+//     if (!isAdmin) {
+//       const enrolledCourse = user.enrolledCourses?.find((ec) => ec.course.toString() === courseId)
+//       hasAccess = enrolledCourse && (enrolledCourse.enrollmentType === 'full' || enrolledCourse.enrolledModules.some((em) => em.module.toString() === moduleId))
+//     }
+
+//     if (!hasAccess) {
+//       return next(new AppError('You do not have access to this module', 403))
+//     }
+
+//     const lesson = await Lesson.findOne({
+//       _id: lessonId,
+//       module: moduleId,
+//       isDeleted: false,
+//     }).populate({
+//       path: 'quiz',
+//       match: { isDeleted: false },
+//     })
+
+//     if (!lesson || !lesson.quiz) {
+//       return next(new AppError('Quiz not found', 404))
+//     }
+
+//     const quiz = lesson.quiz
+
+//     // Different response based on user role
+//     if (isAdmin) {
+//       // For admin users, return full quiz data including all questions and correct answers
+//       return res.status(200).json({
+//         status: 'success',
+//         data: {
+//           quiz: {
+//             _id: quiz._id,
+//             title: quiz.title,
+//             quizTime: quiz.quizTime,
+//             passingScore: quiz.passingScore,
+//             maxAttempts: quiz.maxAttempts,
+//             totalMarks: quiz.totalMarks,
+//             questionPoolSize: quiz.questionPoolSize,
+//             questions: quiz.questions, // Include full questions with correct answers
+//             createdAt: quiz.createdAt,
+//             updatedAt: quiz.updatedAt,
+//           },
+//           attemptCount: await QuizAttempt.countDocuments({ quiz: quiz._id }),
+//           pendingGrading: await QuizAttempt.countDocuments({ quiz: quiz._id, status: 'submitted' }),
+//         },
+//       })
+//     }
+
+//     // For regular users, determine if they can take the quiz
+//     let canTakeQuiz = true
+//     let blockedReason = null
+
+//     // Time requirement check - Only if specifically set
+//     if (lesson.quizSettings?.minimumTimeRequired > 0) {
+//       const timeProgress = await LessonProgress.findOne({
+//         user: userId,
+//         lesson: lessonId,
+//       })
+
+//       if (!timeProgress || timeProgress.timeSpent < lesson.quizSettings.minimumTimeRequired * 60) {
+//         canTakeQuiz = false
+//         blockedReason = `You need to spend at least ${lesson.quizSettings.minimumTimeRequired} minutes on this lesson`
+//       }
+//     }
+
+//     // Get user's previous attempts
+//     const attempts = await QuizAttempt.find({
+//       quiz: quiz._id,
+//       user: userId,
+//     }).sort('-createdAt')
+
+//     // Check if user has reached the maximum attempts
+//     const completedAttempts = attempts.filter((attempt) => attempt.status !== 'inProgress')
+//     const canStartNewAttempt = canTakeQuiz && completedAttempts.length < quiz.maxAttempts
+
+//     // Check if there are any in-progress attempts
+//     const inProgressAttempt = attempts.find((attempt) => attempt.status === 'inProgress')
+//     let ongoingAttemptId = null
+
+//     if (inProgressAttempt) {
+//       // Check if the attempt has expired based on quiz time
+//       const timeLimit = quiz.quizTime * 60 * 1000 // Convert to milliseconds
+//       const timeSinceStart = new Date() - inProgressAttempt.startTime
+
+//       if (timeSinceStart <= timeLimit) {
+//         // Still valid, provide the attempt ID
+//         ongoingAttemptId = inProgressAttempt._id
+//       }
+//     }
+
+//     // Get progress data for this user and module
+//     const progress = await Progress.findOne({
+//       user: userId,
+//       module: moduleId,
+//     })
+
+//     // Check if the quiz has been completed
+//     const quizCompleted = progress?.completedQuizzes.some((qId) => qId.toString() === quiz._id.toString()) || false
+
+//     // Return regular user data with improved diagnostic information
+//     res.status(200).json({
+//       status: 'success',
+//       data: {
+//         quiz: {
+//           _id: quiz._id,
+//           title: quiz.title,
+//           quizTime: quiz.quizTime,
+//           passingScore: quiz.passingScore,
+//           maxAttempts: quiz.maxAttempts,
+//           totalMarks: quiz.totalMarks,
+//           questionCount: quiz.questions.length,
+//           questionPoolSize: quiz.questionPoolSize,
+//         },
+//         attempts: attempts.map((attempt) => ({
+//           _id: attempt._id,
+//           score: attempt.score,
+//           percentage: attempt.percentage,
+//           status: attempt.status,
+//           startTime: attempt.startTime,
+//           submitTime: attempt.submitTime,
+//           passed: attempt.passed,
+//         })),
+//         canTakeQuiz,
+//         canStartNewAttempt,
+//         ongoingAttemptId,
+//         blockedReason,
+//         completedAttemptsCount: completedAttempts.length,
+//         quizCompleted,
+//         requirements: lesson.quizSettings,
+//       },
+//     })
+//   } catch (error) {
+//     next(error)
+//   }
+// }
+
 exports.getQuiz = async (req, res, next) => {
   try {
     const { courseId, moduleId, lessonId } = req.params
@@ -322,6 +533,16 @@ exports.getQuiz = async (req, res, next) => {
       if (!timeProgress || timeProgress.timeSpent < lesson.quizSettings.minimumTimeRequired * 60) {
         canTakeQuiz = false
         blockedReason = `You need to spend at least ${lesson.quizSettings.minimumTimeRequired} minutes on this lesson`
+      }
+    }
+
+    // Previous lesson quiz check - Only if not already blocked
+    if (canTakeQuiz) {
+      const previousQuizPassed = await hasPreviousLessonQuizPassed(userId, moduleId, lessonId)
+
+      if (!previousQuizPassed) {
+        canTakeQuiz = false
+        blockedReason = 'You must pass the quiz in the previous lesson before taking this quiz'
       }
     }
 
