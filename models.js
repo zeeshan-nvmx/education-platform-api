@@ -985,6 +985,24 @@ const paymentSchema = new mongoose.Schema(
     gatewayPageURL: String,
     gatewayData: Object,
     sslcommerzSessionKey: String,
+    originalAmount: {
+      type: Number,
+      default: 0,
+      required: true,
+    },
+    modulesPriceAdjustment: {
+      type: Number,
+      default: 0,
+    },
+    purchasedModuleIds: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Module',
+      },
+    ],
+    paymentNotes: {
+      type: String,
+    },
     discount: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Discount',
