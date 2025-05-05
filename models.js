@@ -257,6 +257,9 @@ const courseSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    courseTimeManual: {
+      type: String
+    },
     longDescription: {
       type: String,
       maxLength: 50000, // 50KB limit for rich text content

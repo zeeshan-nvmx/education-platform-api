@@ -48,6 +48,7 @@ const courseSchema = Joi.object({
   title: Joi.string().trim(),
   description: Joi.string().trim(),
   longDescription: Joi.string().trim(),
+  courseTimeManual: Joi.string().trim(),
   category: Joi.string().trim(),
   price: Joi.number().min(0),
   featured: Joi.boolean(),
@@ -220,6 +221,27 @@ async function validateQuizCompletion(userId, lessonId) {
 
 //   try {
 //     const courseData = JSON.parse(req.body.courseData)
+
+//     // Filter out null, undefined, or empty instructors before validation
+//     if (courseData.instructors && Array.isArray(courseData.instructors)) {
+//       courseData.instructors = courseData.instructors.filter(
+//         (instructor) => instructor && typeof instructor === 'object' && Object.keys(instructor).length > 0 && instructor.name
+//       )
+//     }
+
+//     // Check if we have at least one valid instructor
+//     if (!courseData.instructors || courseData.instructors.length === 0) {
+//       return res.status(400).json({
+//         status: 'error',
+//         errors: [
+//           {
+//             field: 'instructors',
+//             message: 'At least one valid instructor is required',
+//           },
+//         ],
+//       })
+//     }
+
 //     const { error, value } = courseSchema.validate(courseData)
 
 //     if (error) {
@@ -338,6 +360,7 @@ exports.createCourse = async (req, res, next) => {
       thumbnailKey,
       instructors: instructorsWithImages,
       creator: req.user._id,
+      courseTimeManual: value.courseTimeManual || '',
     })
 
     const populatedCourse = await Course.findById(course._id).populate('creator', 'firstName lastName email')
@@ -352,11 +375,124 @@ exports.createCourse = async (req, res, next) => {
   }
 }
 
+// exports.getPublicCoursesList = async (req, res, next) => {
+//   try {
+//     const page = parseInt(req.query.page) || 1
+//     const limit = parseInt(req.query.limit) || 10
+//     const query = {} 
+
+//     if (req.query.category) query.category = req.query.category
+//     if (req.query.featured) query.featured = req.query.featured === 'true'
+//     if (req.query.search) {
+//       query.$or = [{ title: new RegExp(req.query.search, 'i') }, { description: new RegExp(req.query.search, 'i') }]
+//     }
+
+//     const totalCourses = await Course.countDocuments(query)
+
+//     // Conditional population based on authentication
+//     let coursesQuery = Course.find(query)
+//       .select('title description category thumbnail price rating totalStudents featured createdAt creator modules trailerUrl trailerThumbnail trailerCloudflareVideoId')
+//       .populate({
+//         path: 'modules',
+//         select: 'title description order price lessons',
+//         match: {},
+//         populate: {
+//           path: 'lessons',
+//           select: 'title description order duration requireQuizPass',
+//           match: {},
+//           options: { sort: { order: 1 } },
+//         },
+//       })
+//       .sort({ [req.query.sortBy || 'createdAt']: req.query.order === 'asc' ? 1 : -1 })
+//       .skip((page - 1) * limit)
+//       .limit(limit)
+
+//     if (req.user && req.user._id) {
+//       // If user is authenticated, populate the creator
+//       coursesQuery = coursesQuery.populate({
+//         path: 'creator',
+//         select: 'firstName lastName',
+//       })
+//     }
+    
+
+//     const courses = await coursesQuery.lean()
+
+//     const transformedCourses = courses.map((course) => {
+//       let creatorInfo = { name: 'Unknown Creator' } 
+//       if (course.creator) {
+//         // Check if creator exists (populated)
+//         creatorInfo = {
+//           name: `${course.creator.firstName} ${course.creator.lastName}`,
+//         }
+//       }
+
+//       return {
+//         _id: course._id,
+//         title: course.title,
+//         description: course.description,
+//         category: course.category,
+//         thumbnail: course.thumbnail,
+//         trailerUrl: course.trailerUrl || '',
+//         trailerThumbnail: course.trailerThumbnail || '',
+//         trailerCloudflareVideoId: course.trailerCloudflareVideoId || '',
+//         price: course.price,
+//         rating: course.rating,
+//         totalStudents: course.totalStudents,
+//         featured: course.featured,
+//         createdAt: course.createdAt,
+//         creator: creatorInfo,
+//         modules: course.modules.map((module) => ({
+//           _id: module._id,
+//           title: module.title,
+//           description: module.description,
+//           order: module.order,
+//           price: module.price,
+//           totalLessons: module.lessons.length,
+//           lessons: module.lessons.map((lesson) => ({
+//             _id: lesson._id,
+//             title: lesson.title,
+//             description: lesson.description,
+//             order: lesson.order,
+//             duration: lesson.duration,
+//             hasQuiz: lesson.requireQuizPass,
+//           })),
+//         })),
+//         statistics: {
+//           totalModules: course.modules.length,
+//           totalLessons: course.modules.reduce((acc, module) => acc + module.lessons.length, 0),
+//           totalDuration: course.modules.reduce((acc, module) => acc + module.lessons.reduce((sum, lesson) => sum + (lesson.duration || 0), 0), 0),
+//         },
+//       }
+//     })
+
+//     const totalPages = Math.ceil(totalCourses / limit)
+
+//     res.status(200).json({
+//       status: 'success',
+//       message: 'Courses fetched successfully',
+//       data: {
+//         courses: transformedCourses,
+//         pagination: {
+//           currentPage: page,
+//           totalPages,
+//           totalCourses,
+//           hasNextPage: page < totalPages,
+//           hasPrevPage: page > 1,
+//         },
+//       },
+//     })
+//   } catch (error) {
+//     console.error('getPublicCoursesList error:', error)
+//     next(error)
+//   }
+// }
+
 exports.getPublicCoursesList = async (req, res, next) => {
   try {
     const page = parseInt(req.query.page) || 1
     const limit = parseInt(req.query.limit) || 10
-    const query = {} 
+    const query = {}
 
     if (req.query.category) query.category = req.query.category
     if (req.query.featured) query.featured = req.query.featured === 'true'
@@ -368,7 +504,9 @@ exports.getPublicCoursesList = async (req, res, next) => {
 
     // Conditional population based on authentication
     let coursesQuery = Course.find(query)
-      .select('title description category thumbnail price rating totalStudents featured createdAt creator modules trailerUrl trailerThumbnail trailerCloudflareVideoId')
+      .select(
+        'title description category thumbnail price rating totalStudents featured createdAt creator modules trailerUrl trailerThumbnail trailerCloudflareVideoId courseTimeManual'
+      )
       .populate({
         path: 'modules',
         select: 'title description order price lessons',
@@ -391,12 +529,11 @@ exports.getPublicCoursesList = async (req, res, next) => {
         select: 'firstName lastName',
       })
     }
-    
 
     const courses = await coursesQuery.lean()
 
     const transformedCourses = courses.map((course) => {
-      let creatorInfo = { name: 'Unknown Creator' } 
+      let creatorInfo = { name: 'Unknown Creator' }
       if (course.creator) {
         // Check if creator exists (populated)
         creatorInfo = {
@@ -418,6 +555,7 @@ exports.getPublicCoursesList = async (req, res, next) => {
         totalStudents: course.totalStudents,
         featured: course.featured,
         createdAt: course.createdAt,
+        courseTimeManual: course.courseTimeManual || '',
         creator: creatorInfo,
         modules: course.modules.map((module) => ({
           _id: module._id,
@@ -465,6 +603,87 @@ exports.getPublicCoursesList = async (req, res, next) => {
   }
 }
 
+// exports.getAllCourses = async (req, res, next) => {
+//   try {
+//     const { error, value } = querySchema.validate(req.query)
+//     if (error) {
+//       return next(new AppError(error.details[0].message, 400))
+//     }
+
+//     const { page = 1, limit = 10, category, featured, search, minPrice, maxPrice, sortBy = 'createdAt', order = 'desc' } = value
+
+//     const query = {} 
+
+//     if (category) {
+//       query.category = category
+//     }
+
+//     if (featured) {
+//       query.featured = featured === 'true'
+//     }
+
+//     if (search) {
+//       const searchRegex = new RegExp(search, 'i')
+//       query.$or = [{ title: searchRegex }, { description: searchRegex }]
+//     }
+
+//     if (!isNaN(minPrice) || !isNaN(maxPrice)) {
+//       query.price = {}
+//       if (!isNaN(minPrice)) query.price.$gte = parseFloat(minPrice)
+//       if (!isNaN(maxPrice)) query.price.$lte = parseFloat(maxPrice)
+//     }
+
+//     const validPage = Math.max(1, parseInt(page))
+//     const validLimit = Math.min(100, Math.max(1, parseInt(limit)))
+//     const skip = (validPage - 1) * validLimit
+
+//     const allowedSortFields = ['createdAt', 'price', 'rating', 'totalStudents']
+//     const validSortBy = allowedSortFields.includes(sortBy) ? sortBy : 'createdAt'
+//     const sortDirection = order === 'asc' ? 1 : -1
+//     const sortOptions = { [validSortBy]: sortDirection }
+
+//     const [totalCourses, courses] = await Promise.all([
+//       Course.countDocuments(query),
+//       Course.find(query)
+//         .select('-__v') 
+//         .populate('creator', 'firstName lastName email')
+//         .sort(sortOptions)
+//         .skip(skip)
+//         .limit(validLimit)
+//         .lean()
+//         .exec(),
+//     ])
+
+//     const totalPages = Math.ceil(totalCourses / validLimit)
+
+//     res.status(200).json({
+//       message: 'Courses fetched successfully',
+//       data: {
+//         courses: courses.map((course) => ({
+//           ...course,
+//           trailerUrl: course.trailerUrl || '',
+//           trailerThumbnail: course.trailerThumbnail || '',
+//           trailerCloudflareVideoId: course.trailerCloudflareVideoId || '',
+//           creator: {
+//             name: `${course.creator?.firstName || ''} ${course.creator?.lastName || ''}`.trim(),
+//             email: course.creator?.email,
+//           },
+//         })),
+//         pagination: {
+//           currentPage: validPage,
+//           totalPages,
+//           totalCourses,
+//           hasNextPage: validPage < totalPages,
+//           hasPrevPage: validPage > 1,
+//         },
+//       },
+//     })
+//   } catch (error) {
+//     console.error('getAllCourses error:', error)
+//     next(error)
+//   }
+// }
+
 exports.getAllCourses = async (req, res, next) => {
   try {
     const { error, value } = querySchema.validate(req.query)
@@ -474,7 +693,7 @@ exports.getAllCourses = async (req, res, next) => {
 
     const { page = 1, limit = 10, category, featured, search, minPrice, maxPrice, sortBy = 'createdAt', order = 'desc' } = value
 
-    const query = {} 
+    const query = {}
 
     if (category) {
       query.category = category
@@ -506,14 +725,7 @@ exports.getAllCourses = async (req, res, next) => {
 
     const [totalCourses, courses] = await Promise.all([
       Course.countDocuments(query),
-      Course.find(query)
-        .select('-__v') 
-        .populate('creator', 'firstName lastName email')
-        .sort(sortOptions)
-        .skip(skip)
-        .limit(validLimit)
-        .lean()
-        .exec(),
+      Course.find(query).select('-__v').populate('creator', 'firstName lastName email').sort(sortOptions).skip(skip).limit(validLimit).lean().exec(),
     ])
 
     const totalPages = Math.ceil(totalCourses / validLimit)
@@ -526,6 +738,7 @@ exports.getAllCourses = async (req, res, next) => {
           trailerUrl: course.trailerUrl || '',
           trailerThumbnail: course.trailerThumbnail || '',
           trailerCloudflareVideoId: course.trailerCloudflareVideoId || '',
+          courseTimeManual: course.courseTimeManual || '',
           creator: {
             name: `${course.creator?.firstName || ''} ${course.creator?.lastName || ''}`.trim(),
             email: course.creator?.email,
@@ -617,7 +830,7 @@ exports.getAllCourses = async (req, res, next) => {
 //     const isAdmin = authenticatedUser?.role === 'admin'
 //     console.log(`User roles - Creator: ${isCreator}, Admin: ${isAdmin}`)
 
-//     //  Build the Course Data 
+//     //  Build the Course Data
 //     const courseDetails = {
 //       _id: course._id,
 //       title: course.title || '',
@@ -632,6 +845,15 @@ exports.getAllCourses = async (req, res, next) => {
 //       rating: course.rating || 0,
 //       totalStudents: course.totalStudents || 0,
 //       featured: course.featured || false,
+//       // Include the newly added fields
+//       courseOverview: course.courseOverview || '',
+//       learning: course.learning || '',
+//       courseReq: course.courseReq || '',
+//       courseBenefit: course.courseBenefit || '',
+//       whyChoose: course.whyChoose || '',
+//       knowledgePartImage1: course.knowledgePartImage1 || null,
+//       knowledgePartImage2: course.knowledgePartImage2 || null,
+//       knowledgePartImage3: course.knowledgePartImage3 || null,
 //       creator: course.creator
 //         ? {
 //             name: `${course.creator.firstName || ''} ${course.creator.lastName || ''}`.trim(),
@@ -1023,6 +1245,7 @@ exports.getCourse = async (req, res, next) => {
       rating: course.rating || 0,
       totalStudents: course.totalStudents || 0,
       featured: course.featured || false,
+      courseTimeManual: course.courseTimeManual || '',
       // Include the newly added fields
       courseOverview: course.courseOverview || '',
       learning: course.learning || '',
@@ -1342,6 +1565,30 @@ exports.getCourse = async (req, res, next) => {
 
 //   try {
 //     const courseData = JSON.parse(req.body.courseData || '{}')
+
+//     // Default behavior is to append instructors, unless replaceInstructors is explicitly set to true
+//     const isReplaceOperation = courseData.replaceInstructors === true
+
+//     // Filter out null, undefined, or empty instructors before validation
+//     if (courseData.instructors && Array.isArray(courseData.instructors)) {
+//       courseData.instructors = courseData.instructors.filter(
+//         (instructor) => instructor && typeof instructor === 'object' && Object.keys(instructor).length > 0 && instructor.name
+//       )
+
+//       // If instructors array provided but empty after filtering, this is an error
+//       if (courseData.instructors.length === 0) {
+//         return res.status(400).json({
+//           status: 'error',
+//           errors: [
+//             {
+//               field: 'instructors',
+//               message: 'At least one valid instructor is required',
+//             },
+//           ],
+//         })
+//       }
+//     }
+
 //     const { error, value } = courseSchema.validate(courseData)
 
 //     if (error) {
@@ -1375,13 +1622,21 @@ exports.getCourse = async (req, res, next) => {
 //     }
 
 //     if (value.instructors) {
-//       const oldInstructorImageKeys = course.instructors.filter((inst) => inst.imageKey).map((inst) => inst.imageKey)
-
+//       // Get new instructors with images
 //       const instructorsWithImages = await handleInstructorImages(value.instructors, req.files?.instructorImages)
 //       newUploadedImageKeys = newUploadedImageKeys.concat(instructorsWithImages.filter((inst) => inst.imageKey).map((inst) => inst.imageKey))
 
-//       value.instructors = instructorsWithImages
-//       await cleanupInstructorImages(oldInstructorImageKeys)
+//       // Replace existing instructors (only if explicitly requested)
+//       if (isReplaceOperation) {
+//         const oldInstructorImageKeys = course.instructors.filter((inst) => inst.imageKey).map((inst) => inst.imageKey)
+//         value.instructors = instructorsWithImages
+//         await cleanupInstructorImages(oldInstructorImageKeys)
+//       }
+//       // Append new instructors to existing ones (default behavior)
+//       else {
+//         // Combine existing instructors with new ones
+//         value.instructors = [...course.instructors, ...instructorsWithImages]
+//       }
 //     }
 
 //     if (value.description) {
