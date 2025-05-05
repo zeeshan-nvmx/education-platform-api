@@ -1182,7 +1182,7 @@ exports.getCourse = async (req, res, next) => {
         options: { sort: { order: 1 } },
         populate: {
           path: 'lessons',
-          select: 'title description order videoUrl duration requireQuizPass completionRequirements quizSettings assets',
+          select: 'title description order videoUrl duration requireQuizPass completionRequirements quizSettings assets quiz',
           options: { sort: { order: 1 } },
           populate: {
             path: 'quiz',
@@ -1282,9 +1282,24 @@ exports.getCourse = async (req, res, next) => {
       completedLessons: 0,
       totalLessons: 0,
       completedQuizzes: 0,
-      totalQuizzes: 0, // Added to track overall quiz completion
+      totalQuizzes: 0,
       overallProgress: 0,
     }
+
+    // Count total quizzes in advance for accurate reporting
+    let totalQuizzesCount = 0
+    if (Array.isArray(course.modules)) {
+      course.modules.forEach((module) => {
+        if (Array.isArray(module.lessons)) {
+          module.lessons.forEach((lesson) => {
+            if (lesson.quiz) {
+              totalQuizzesCount++
+            }
+          })
+        }
+      })
+    }
+    courseProgress.totalQuizzes = totalQuizzesCount
 
     if (enrollment && userId) {
       const allModuleProgress = await Progress.find({
@@ -1373,7 +1388,7 @@ exports.getCourse = async (req, res, next) => {
             }
           }
 
-          //Update course progress
+          // Update course progress
           courseProgress.totalModules += 1
           if (moduleData.progress.progress === 100) {
             courseProgress.completedModules += 1
@@ -1405,7 +1420,6 @@ exports.getCourse = async (req, res, next) => {
                 progress: {
                   // Initialize lesson progress
                   completed: false,
-                  //quizCompleted: false, // Removed as requested
                 },
               }
               courseProgress.totalLessons += 1
@@ -1427,12 +1441,11 @@ exports.getCourse = async (req, res, next) => {
                   },
                   progress: {
                     // Initialize quiz progress
-                    completed: false, //  <--- THIS WAS MISSING, now restored
+                    completed: false,
                     canTake: false,
                     remainingAttempts: 0,
                   },
                 }
-                courseProgress.totalQuizzes += 1
               }
 
               // --- Fetch Lesson-Specific Progress ---
@@ -1460,7 +1473,7 @@ exports.getCourse = async (req, res, next) => {
                     moduleProgress && moduleProgress.completedQuizzes.some((completedQuizId) => completedQuizId.toString() === lesson.quiz._id.toString())
 
                   // FIX: Set completed status here!
-                  lessonData.quiz.progress.completed = isQuizCompleted // <---  RESTORE THIS LINE
+                  lessonData.quiz.progress.completed = isQuizCompleted
                   lessonData.quiz.progress.canTake = await checkQuizRequirements(userId, lesson._id)
                   lessonData.quiz.progress.remainingAttempts = Math.max(lesson.quiz.maxAttempts - quizAttempts.length, 0)
                 }
@@ -1538,10 +1551,7 @@ exports.getCourse = async (req, res, next) => {
         (acc, module) => acc + (Array.isArray(module.lessons) ? module.lessons.reduce((sum, lesson) => sum + (lesson?.duration || 0), 0) : 0),
         0
       ),
-      totalQuizzes: courseDetails.modules.reduce(
-        (acc, module) => acc + (Array.isArray(module.lessons) ? module.lessons.reduce((sum, lesson) => sum + (lesson?.quiz ? 1 : 0), 0) : 0),
-        0
-      ),
+      totalQuizzes: totalQuizzesCount, // Use the pre-counted value for consistency
     }
 
     const finalResponse = {
