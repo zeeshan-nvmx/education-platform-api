@@ -5,6 +5,7 @@ const { AppError } = require('../utils/errors')
 /**
  * Test enrollment in a full course
  */
+
 exports.enrollInCourse = async (req, res, next) => {
   const session = await mongoose.startSession()
   session.startTransaction()

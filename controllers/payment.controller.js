@@ -136,23 +136,60 @@ async function calculateModulePriceAdjustment(userId, courseId, session) {
 }
 
 
+// async function calculateDiscountedAmount(amount, discountCode, courseId, moduleId = null) {
+//   if (!discountCode) return { discountedAmount: amount, discount: null }
+
+//   const discount = await Discount.findOne({
+//     code: discountCode.toUpperCase(),
+//     $or: [
+//       { course: courseId },
+//       { module: moduleId },
+//       { course: null, module: null }, // Global discount
+//     ],
+//     startDate: { $lte: new Date() },
+//     endDate: { $gte: new Date() },
+//     usedCount: { $lt: { $ifNull: ['$maxUses', Number.MAX_SAFE_INTEGER] } },
+//     isDeleted: false,
+//   })
+
+//   if (!discount) return { discountedAmount: amount, discount: null }
+
+//   const discountAmount = discount.type === 'percentage' ? (amount * discount.value) / 100 : discount.value
+
+//   return {
+//     discountedAmount: Math.max(0, amount - discountAmount),
+//     discount: discount._id,
+//   }
+// }
+
 async function calculateDiscountedAmount(amount, discountCode, courseId, moduleId = null) {
   if (!discountCode) return { discountedAmount: amount, discount: null }
 
-  const discount = await Discount.findOne({
+  // Build the query
+  const query = {
     code: discountCode.toUpperCase(),
-    $or: [
+    startDate: { $lte: new Date() },
+    endDate: { $gte: new Date() },
+    isDeleted: false,
+  }
+
+  // Add course/module/global conditions
+  if (courseId || moduleId) {
+    query.$or = [
       { course: courseId },
       { module: moduleId },
       { course: null, module: null }, // Global discount
-    ],
-    startDate: { $lte: new Date() },
-    endDate: { $gte: new Date() },
-    usedCount: { $lt: { $ifNull: ['$maxUses', Number.MAX_SAFE_INTEGER] } },
-    isDeleted: false,
-  })
+    ]
+  }
+
+  const discount = await Discount.findOne(query)
 
   if (!discount) return { discountedAmount: amount, discount: null }
+
+  // Check usage limit separately
+  if (discount.maxUses && discount.usedCount >= discount.maxUses) {
+    return { discountedAmount: amount, discount: null }
+  }
 
   const discountAmount = discount.type === 'percentage' ? (amount * discount.value) / 100 : discount.value
 
