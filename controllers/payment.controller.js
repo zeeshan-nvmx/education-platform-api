@@ -165,32 +165,43 @@ async function calculateModulePriceAdjustment(userId, courseId, session) {
 async function calculateDiscountedAmount(amount, discountCode, courseId, moduleId = null) {
   if (!discountCode) return { discountedAmount: amount, discount: null }
 
-  // Build the query
-  const query = {
+  // First, find discounts that match the code and are within valid dates
+  const baseQuery = {
     code: discountCode.toUpperCase(),
     startDate: { $lte: new Date() },
     endDate: { $gte: new Date() },
     isDeleted: false,
   }
 
-  // Add course/module/global conditions
-  if (courseId || moduleId) {
-    query.$or = [
+  // Add course/module specificity
+  if (courseId && moduleId) {
+    baseQuery.$or = [
+      { course: courseId, module: null },
+      { course: null, module: moduleId },
+      { course: null, module: null }, // Global discount
+    ]
+  } else if (courseId) {
+    baseQuery.$or = [
       { course: courseId },
+      { course: null, module: null }, // Global discount
+    ]
+  } else if (moduleId) {
+    baseQuery.$or = [
       { module: moduleId },
       { course: null, module: null }, // Global discount
     ]
   }
 
-  const discount = await Discount.findOne(query)
+  const discount = await Discount.findOne(baseQuery)
 
   if (!discount) return { discountedAmount: amount, discount: null }
 
-  // Check usage limit separately
+  // Check usage limit after finding the discount
   if (discount.maxUses && discount.usedCount >= discount.maxUses) {
     return { discountedAmount: amount, discount: null }
   }
 
+  // Calculate the discount amount
   const discountAmount = discount.type === 'percentage' ? (amount * discount.value) / 100 : discount.value
 
   return {
